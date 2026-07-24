@@ -25,12 +25,13 @@ from pathlib import Path
 
 import numpy as np
 
-ROOT = Path(__file__).resolve().parent
-DATA = ROOT / "data" / "pilot.jsonl"
-FULL_DATA = ROOT / "data" / "controlled_full.jsonl"
-ARTIFACT_LENGTHMATCHED = ROOT / "data" / "controlled_lengthmatched.jsonl"
-ARTIFACT_RANDPOS = ROOT / "data" / "controlled_randpos.jsonl"
-ARTIFACT_INDIRECT = ROOT / "data" / "controlled_indirect.jsonl"
+ROOT = Path(__file__).resolve().parent.parent
+_CORPUS = ROOT / "data_generation" / "corpus"
+DATA = _CORPUS / "pilot.jsonl"
+FULL_DATA = _CORPUS / "controlled_full.jsonl"
+ARTIFACT_LENGTHMATCHED = _CORPUS / "controlled_lengthmatched.jsonl"
+ARTIFACT_RANDPOS = _CORPUS / "controlled_randpos.jsonl"
+ARTIFACT_INDIRECT = _CORPUS / "controlled_indirect.jsonl"
 ARTIFACT_TIERS = {
     "lengthmatched": ARTIFACT_LENGTHMATCHED,
     "randpos": ARTIFACT_RANDPOS,
@@ -3105,7 +3106,7 @@ OBSERVATION_PROMPT = DEEPSEEK_OBSERVATION_PROMPT
 
 def qwen_relabel_mimic(limit: int = 0, workers: int = 1, device: str | None = None) -> Path:
     """Relabel encoder-visible MIMIC observation status with Qwen3-12B-Instruct."""
-    from supplementary.data_generation.qwen_observation_labeler import relabel_mimic_notes
+    from data_generation.qwen_observation_labeler import relabel_mimic_notes
 
     return relabel_mimic_notes(limit=limit, device=device)
 

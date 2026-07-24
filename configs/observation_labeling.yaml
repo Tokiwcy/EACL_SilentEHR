@@ -48,7 +48,8 @@ parser:
 paths:
   raw_labels: data/mimic_qwen3_labels.jsonl
   struct_overlay: data/mimic_struct_qwen3.jsonl
-  prompt: supplementary/prompts/observation_status.txt
+  prompt: prompts/observation_status.txt
+  corpus: data_generation/corpus
 
 public_release_note: |
   Do not upload raw label JSON containing evidence_span text or discharge-note

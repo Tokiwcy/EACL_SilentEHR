@@ -7,11 +7,10 @@ import json
 import sys
 from pathlib import Path
 
-SUP_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(SUP_ROOT.parent))
-sys.path.insert(0, str(SUP_ROOT))
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
 
-from supplementary.paths import DATA_DIR, OUTPUT_DIR, ensure_repo_on_path  # noqa: E402
+from data_generation.paths import OUTPUT_DIR, ensure_repo_on_path  # noqa: E402
 
 ensure_repo_on_path()
 
@@ -21,12 +20,11 @@ def main() -> None:
     ap.add_argument(
         "cmd",
         choices=["build-struct", "label", "cxo", "pipeline"],
-        help="build-struct=overlay labels; label=Qwen3-12B; cxo=classifier; pipeline=all",
     )
     ap.add_argument("--mimic-dir", type=Path, default=Path(r"D:\mimic-iv-3.1"))
     ap.add_argument("--notes", type=Path, default=None)
     ap.add_argument("--max-hadm", type=int, default=2000)
-    ap.add_argument("--limit", type=int, default=0, help="max notes for Qwen3 labeling")
+    ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--model", default="hash", choices=["hash", "tfidf", "qwen", "jina", "biolord"])
     ap.add_argument("--device", default=None)
     ap.add_argument("--cap-per-cell", type=int, default=500)
@@ -34,15 +32,15 @@ def main() -> None:
     ap.add_argument("--skip-label", action="store_true")
     args = ap.parse_args()
 
-    from silentehr import (  # noqa: WPS433
+    from data_generation.qwen_observation_labeler import (  # noqa: WPS433
+        build_qwen3_struct,
+        relabel_mimic_notes,
+    )
+    from data_generation.silentehr import (  # noqa: WPS433
         MIMIC_STRUCT,
         MIMIC_STRUCT_QWEN3,
         mimic_build,
         mimic_cxo_experiment,
-    )
-    from supplementary.data_generation.qwen_observation_labeler import (  # noqa: WPS433
-        build_qwen3_struct,
-        relabel_mimic_notes,
     )
 
     if args.cmd in ("build-struct", "pipeline") and not args.skip_label:

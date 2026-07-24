@@ -8,9 +8,9 @@ from pathlib import Path
 
 import numpy as np
 
-from silentehr import FULL_DATA, OUT, Embedder, _train_lr, load_rows, protocol_split
-from supplementary.evaluation.trap_runner import run_binary_trap
-from supplementary.paths import OUTPUT_DIR
+from data_generation.silentehr import FULL_DATA, OUT, Embedder, _train_lr, load_rows, protocol_split
+from data_generation.paths import OUTPUT_DIR
+from evaluation.trap_runner import run_binary_trap
 
 
 NEG_CUES = (

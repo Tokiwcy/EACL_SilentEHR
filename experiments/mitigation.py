@@ -7,17 +7,16 @@ import json
 import sys
 from pathlib import Path
 
-SUP_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(SUP_ROOT.parent))
-sys.path.insert(0, str(SUP_ROOT))
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
 
-from supplementary.paths import OUTPUT_DIR, ensure_repo_on_path  # noqa: E402
+from data_generation.paths import OUTPUT_DIR, ensure_repo_on_path  # noqa: E402
 
 ensure_repo_on_path()
 
 
 def main() -> None:
-    from silentehr import FULL_DATA, run  # noqa: WPS433
+    from data_generation.silentehr import FULL_DATA, run  # noqa: WPS433
 
     ap = argparse.ArgumentParser(description="SilentEHR mitigation (few-shot Unknown)")
     ap.add_argument("--model", default="qwen")

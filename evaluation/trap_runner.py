@@ -5,7 +5,7 @@ import random
 
 import numpy as np
 
-from silentehr import _train_lr, pair_features, protocol_split
+from data_generation.silentehr import _train_lr, pair_features, protocol_split
 
 
 def compose_pair_features(ex, eh, mode="full"):

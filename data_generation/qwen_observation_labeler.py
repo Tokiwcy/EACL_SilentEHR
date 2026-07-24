@@ -10,17 +10,17 @@ from typing import Any
 
 import yaml
 
-from supplementary.paths import DATA_DIR, OUTPUT_DIR, REPO_ROOT, ensure_repo_on_path
+from data_generation.paths import MIMIC_DATA_DIR, OUTPUT_DIR, REPO_ROOT, ensure_repo_on_path
 
 ensure_repo_on_path()
 
 OBSERVATION_LABEL_MODEL = "qwen3-12b"
 DEFAULT_MODEL = "Qwen/Qwen3-12B-Instruct"
-PROMPT_PATH = REPO_ROOT / "supplementary" / "prompts" / "observation_status.txt"
-CONFIG_PATH = REPO_ROOT / "supplementary" / "configs" / "observation_labeling.yaml"
-LABELS_PATH = DATA_DIR / "mimic_qwen3_labels.jsonl"
-STRUCT_PATH = DATA_DIR / "mimic_struct_qwen3.jsonl"
-SOURCE_STRUCT = DATA_DIR / "mimic_struct.jsonl"
+PROMPT_PATH = REPO_ROOT / "prompts" / "observation_status.txt"
+CONFIG_PATH = REPO_ROOT / "configs" / "observation_labeling.yaml"
+LABELS_PATH = MIMIC_DATA_DIR / "mimic_qwen3_labels.jsonl"
+STRUCT_PATH = MIMIC_DATA_DIR / "mimic_struct_qwen3.jsonl"
+SOURCE_STRUCT = MIMIC_DATA_DIR / "mimic_struct.jsonl"
 
 QWEN3_TO_MENTION = {
     "observed_positive": "observed_pos",
@@ -38,7 +38,7 @@ ALLOWED_STATUSES = set(QWEN3_TO_MENTION)
 def load_prompt() -> str:
     if PROMPT_PATH.exists():
         return PROMPT_PATH.read_text(encoding="utf-8").strip()
-    from silentehr import OBSERVATION_PROMPT  # noqa: WPS433
+    from data_generation.silentehr import OBSERVATION_PROMPT  # noqa: WPS433
 
     return OBSERVATION_PROMPT.strip()
 
@@ -173,7 +173,7 @@ class Qwen3ObservationLabeler:
 
 
 def group_notes_by_hadm(source: Path | None = None) -> dict[int, dict]:
-    from silentehr import load_rows  # noqa: WPS433
+    from data_generation.silentehr import load_rows  # noqa: WPS433
 
     rows = load_rows(source or SOURCE_STRUCT)
     grouped: dict[int, dict] = {}
@@ -194,7 +194,6 @@ def relabel_mimic_notes(
     source: Path | None = None,
     device: str | None = None,
 ) -> Path:
-    """Label unique admission notes with Qwen3-12B; resume from partial output."""
     output = output or LABELS_PATH
     grouped = group_notes_by_hadm(source)
     completed: set[int] = set()
@@ -257,10 +256,9 @@ def build_qwen3_struct(
     labels_path: Path | None = None,
     output: Path | None = None,
 ) -> Path:
-    """Overlay Qwen3-12B observation labels onto encoder-visible MIMIC rows."""
     from collections import Counter
 
-    from silentehr import load_rows  # noqa: WPS433
+    from data_generation.silentehr import load_rows  # noqa: WPS433
 
     source = source or SOURCE_STRUCT
     labels_path = labels_path or LABELS_PATH
@@ -319,6 +317,7 @@ if __name__ == "__main__":
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--device", default=None)
     args = ap.parse_args()
+    ensure_repo_on_path()
     if args.cmd == "label":
         relabel_mimic_notes(limit=args.limit, device=args.device)
     else:

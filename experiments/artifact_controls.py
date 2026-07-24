@@ -7,13 +7,12 @@ import json
 import sys
 from pathlib import Path
 
-SUP_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(SUP_ROOT.parent))
-sys.path.insert(0, str(SUP_ROOT))
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
 
-from supplementary.data_generation.controlled_corpus import generate_artifact_tiers  # noqa: E402
-from supplementary.evaluation.artifact_baselines import run_all  # noqa: E402
-from supplementary.paths import OUTPUT_DIR, ensure_repo_on_path  # noqa: E402
+from data_generation.controlled_corpus import generate_artifact_tiers  # noqa: E402
+from data_generation.paths import OUTPUT_DIR, ensure_repo_on_path  # noqa: E402
+from evaluation.artifact_baselines import run_all  # noqa: E402
 
 ensure_repo_on_path()
 

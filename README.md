@@ -1,64 +1,65 @@
-# SilentEHR / COLING reproduction package
+# SilentEHR — EACL reproduction package
 
-Research code for **SilentEHR**: epistemic collapse in frozen patient
-representations under binary clinical verification.
+Minimal public release for **SilentEHR: Auditing Closed-World Extrapolation in Frozen Patient Representations**.
 
-## Quick start
+## Layout
+
+```
+├── README.md
+├── requirements.txt
+├── LICENSE
+├── configs/
+├── data_generation/
+│   ├── silentehr.py          # core benchmark engine
+│   ├── controlled_corpus.py
+│   ├── qwen_observation_labeler.py
+│   └── corpus/               # public controlled JSONL (11,466 pairs)
+├── experiments/
+│   ├── controlled_benchmark.py
+│   ├── artifact_controls.py
+│   ├── mimic_bridge.py
+│   └── mitigation.py
+├── evaluation/
+├── prompts/
+└── outputs/                    # created at runtime
+```
+
+MIMIC observation labels use **Qwen/Qwen3-12B-Instruct** (local Hugging Face inference).
+
+## Setup
 
 ```bash
 python -m venv .venv
 # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-python silentehr.py --help
 ```
 
-Paper numbers live in `results.tex`. Regeneration commands are listed in
-`results.md`.
+## Smoke test (CPU, no MIMIC)
 
-## Public vs restricted
+```bash
+python experiments/controlled_benchmark.py --model hash
+```
 
-### Published on GitHub
+Writes `outputs/controlled_hash.json`.
 
-- `silentehr.py`, `supplementary/` (reproduction entry points)
-- `requirements.txt`, paper sources (`results.tex`, `PAPER.md`)
-- Controlled benchmark JSONL: `data/controlled_*.jsonl`, `data/pilot.jsonl`
-- `data/background_contamination.json`
+## Controlled benchmark
 
-### Local only (not in public repo)
+```bash
+python experiments/controlled_benchmark.py --model qwen --device cuda
+python experiments/artifact_controls.py
+python experiments/mitigation.py --model qwen --device cuda
+```
 
-- **`scripts/`** — internal analysis, table extraction, human-audit tooling
-- MIMIC subject/HADM IDs, note text, LLM labels, human audit CSVs
-- `outputs/` (embeddings, experiment JSON with note-derived content)
+## MIMIC (local credentialed data only)
 
-## Key experiments added for revision
+Create a local `data/` folder (gitignored) with PhysioNet MIMIC-IV exports, then:
 
-| Task | Script | Output |
-|------|--------|--------|
-| Real-note 5-fold CV | `scripts/real_clinical_sru_cv.py` | `outputs/real_clinical_sru_cv.json` |
-| Real-note 70/30 split | `scripts/real_clinical_sru_experiment.py` | `outputs/real_clinical_sru_experiment.json` |
-| Abstention + mitigation tables | `scripts/extract_paper_tables.py` | `outputs/paper_table_summaries.json` |
-| Observation labeling config | `configs/observation_labeling.yaml` | — |
+```bash
+python experiments/mimic_bridge.py pipeline --mimic-dir /path/to/mimic-iv-3.1 --limit 10
+```
 
-## IID split note
-
-The SilentEHR **IID** protocol groups all counterfactual variants from the same
-`(background_id, concept_id)` pair into the same fold via a deterministic hash
-(`silentehr.py::stable_index`). It is **not** a random row split.
-
-## Supplementary package
-
-Organized reproduction entry points live in [`supplementary/`](supplementary/README.md):
-controlled benchmark, artifact controls, MIMIC bridge (Qwen3-12B observation labels),
-and mitigation curves.
-
-## Observation labels
-
-MIMIC observation labels use **Qwen/Qwen3-12B-Instruct** (local transformers inference).
-See `supplementary/configs/observation_labeling.yaml` and
-`supplementary/prompts/observation_status.txt`.
+This builds `data/mimic_struct.jsonl`, labels with Qwen3-12B, and runs the C×O bridge.
 
 ## License
 
-MIMIC-derived data remain under PhysioNet data-use agreements. Code and
-controlled synthetic data may be released separately under a permissive license
-at submission time.
+Code and synthetic corpus: MIT (`LICENSE`). MIMIC-derived artifacts remain under PhysioNet data-use agreements.
