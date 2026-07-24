@@ -1,0 +1,55 @@
+# MIMIC observation-label inference — Qwen3-12B (local)
+
+label_model: qwen3-12b
+
+inference:
+  provider: local
+  framework: transformers
+  framework_version: ">=4.51.0"
+  model: Qwen/Qwen3-12B-Instruct
+  model_revision: main
+  variant: instruct
+  chat_template: qwen3
+  thinking: disabled
+  dtype: bfloat16
+  device_map: auto
+  temperature: 0
+  top_p: 1.0
+  top_k: null
+  max_new_tokens: 768
+  workers: 1
+  retry_policy:
+    max_attempts: 5
+    backoff: exponential
+    backoff_cap_s: 16
+  batch_size: 1
+  truncation: none
+
+parser:
+  schema: JSON object with labels[] entries
+  required_fields:
+    - concept
+    - observation_status
+    - temporal_scope
+    - evidence_span
+    - implicit_evidence
+  allowed_statuses:
+    - observed_positive
+    - observed_negative
+    - uncertain
+    - historical_only
+    - admission_only
+    - temporal_conflict
+    - unmentioned
+  span_validation: exact or whitespace-normalized substring of note text
+  on_invalid_span: clear evidence_span, set span_unverified=true
+  on_parse_failure: retry up to max_attempts
+
+paths:
+  raw_labels: data/mimic_qwen3_labels.jsonl
+  struct_overlay: data/mimic_struct_qwen3.jsonl
+  prompt: supplementary/prompts/observation_status.txt
+
+public_release_note: |
+  Do not upload raw label JSON containing evidence_span text or discharge-note
+  excerpts. Restricted MIMIC-derived artifacts stay in credentialed storage.

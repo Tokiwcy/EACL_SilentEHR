@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+*.egg-info/
+
+# MIMIC / human restricted (PhysioNet DUA)
+data/mimic_struct.jsonl
+data/mimic_struct_qwen3.jsonl
+data/mimic_struct_deepseek.jsonl
+data/mimic_qwen3_labels.jsonl
+data/mimic_deepseek_labels.jsonl
+data/real_clinical_sru*.jsonl
+data/real_clinical_sru_expansion*.csv
+data/human*.csv*
+data/mimic_audit_300*.csv
+data/mimic_real_background_pilot.jsonl
+mimic-iv*/
+mimic-iv-note*/
+
+# Large outputs and embeddings
+outputs/
+supplementary/outputs/*
+!supplementary/outputs/.gitkeep
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# LaTeX build
+*.aux
+*.log
+*.out
+*.bbl
+*.blg
+*.synctex.gz
+
+# Secrets
+*.key
+*_API_KEY*

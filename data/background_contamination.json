@@ -1,0 +1,32 @@
+[
+  {
+    "background_id": 19,
+    "concept_id": "active_bleeding",
+    "background": "A 46-year-old man was hospitalized for IV iron after clinic labs showed iron deficiency without acute bleeding source on prior outpatient workup. He tolerated infusion well. He has GERD on PPI. He reports fatigue improving. Outpatient GI follow-up remains scheduled. No new acute complaints during admission."
+  },
+  {
+    "background_id": 2,
+    "concept_id": "antiplatelet_therapy",
+    "background": "This is a 72-year-old man with COPD and prior stroke who was admitted for confusion. He was oriented to person and place after hydration. CT head showed chronic changes only. He resides in an assisted living facility. Medications include inhalers and aspirin. Speech therapy evaluated swallowing and cleared a regular diet. Social work was consulted for disposition. The hospital course has been otherwise uneventful."
+  },
+  {
+    "background_id": 2,
+    "concept_id": "cognitive_impairment",
+    "background": "This is a 72-year-old man with COPD and prior stroke who was admitted for confusion. He was oriented to person and place after hydration. CT head showed chronic changes only. He resides in an assisted living facility. Medications include inhalers and aspirin. Speech therapy evaluated swallowing and cleared a regular diet. Social work was consulted for disposition. The hospital course has been otherwise uneventful."
+  },
+  {
+    "background_id": 9,
+    "concept_id": "cognitive_impairment",
+    "background": "An 75-year-old woman was hospitalized for community contact isolation after a viral exposure at her nursing facility; she remained asymptomatic. Vaccination records were reviewed. She has dementia and hypertension. She required assistance with meals. No new focal neurologic deficits were observed. She was cleared to return to the facility after observation."
+  },
+  {
+    "background_id": 16,
+    "concept_id": "cognitive_impairment",
+    "background": "This 81-year-old man was admitted after a ground-level fall without fracture. He uses a hearing aid. Cognitive screening was at baseline per family. PT/OT recommended short rehab. He has BPH and glaucoma. Medications were reconciled. He was hemodynamically stable throughout the stay."
+  },
+  {
+    "background_id": 13,
+    "concept_id": "liver_dysfunction",
+    "background": "The patient is a 55-year-old woman with rheumatoid arthritis on methotrexate, admitted for evaluation of elevated liver enzymes found in clinic. She was asymptomatic. Hepatitis serologies were pending. Joint exam was stable. Alcohol history was remote. Methotrexate was held pending workup. Hepatology follow-up was arranged."
+  }
+]

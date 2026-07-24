@@ -1,0 +1,1581 @@
+% SilentEHR — ACL-style manuscript (compile with pdflatex + acl.sty)
+\documentclass[11pt]{article}
+
+\usepackage[review]{acl}
+\usepackage{times}
+\usepackage{latexsym}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{placeins}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage{xcolor}
+
+\title{SilentEHR: Auditing Closed-World Extrapolation\\in Frozen Patient Representations}
+
+\author{
+  Anonymous ACL submission
+}
+
+\begin{document}
+\maketitle
+
+
+\begin{abstract}
+Binary clinical verifiers are commonly trained on records that explicitly
+support or refute a proposition, then applied to records that do not mention it.
+We study closed-world extrapolation (CWE): mapping non-observation to Refuted
+rather than Unknown. SilentEHR provides 11{,}466 controlled
+patient--proposition pairs with held-out background, template, and concept
+protocols. A complementary MIMIC-IV analysis separates laboratory state from
+textual observation. Across seven frozen encoders, Unmentioned-to-Refuted rates
+reach 0.99, although six models show no geometric collapse toward Refuted. On
+two human-consensus MIMIC concepts, dense encoders predict absence for 41--55\%
+of structured-positive cases labeled unmentioned by Qwen3-14B; observation
+detection remains near chance. A 300-case dual-annotator audit finds high human
+agreement ($\kappa=.80$) but imperfect LLM labels (cohort-weighted $O^-$ precision .60,
+95\% CI [.42,.78]). Artifact controls preserve the directional result.
+Explicit Unknown supervision reduces CWE, whereas confidence- and
+Mahalanobis-based abstention do not.
+\end{abstract}
+
+\section{Introduction}
+Clinical text often supports patient-level verification questions: whether a
+condition is present, absent, possible, historical, or unresolved. Natural
+language inference (NLI) formalizes related distinctions as entailment,
+contradiction, and neutral \citep{bowman-etal-2015-large,williams-etal-2018-broad},
+and clinical variants evaluate inference over patient histories and trial
+reports \citep{romanov-shivade-2018-lessons,jullien-etal-2023-nli4ct}.
+Clinical assertion systems likewise distinguish explicit presence, possibility,
+and absence for mentioned entities \citep{van-aken-etal-2021-assertion}.
+These settings assume that a model is trained to recognize the relevant
+third state. A common lightweight deployment pattern pairs frozen representations
+with a binary downstream head trained only on explicit positive and negative
+evidence. At deployment, the record may simply not mention the proposition.
+
+Silence is not equivalent to negation. Clinical notes are selective summaries,
+and prior work has treated explicit evidence of absence as a distinct extraction
+problem \citep{carter-etal-2016-evidence}. When a proposition is unmentioned, a
+safe verifier should return Unknown or abstain rather than infer Refuted. Yet a
+binary classifier has no supervised Unknown region and must extrapolate. Average
+accuracy on observed examples does not reveal the direction of this
+extrapolation, whether it is expressed with high confidence, or whether it is
+already encoded in the geometry of the frozen representation.
+
+We study this failure mode, which we call \emph{closed-world extrapolation}
+(CWE). SilentEHR creates matched counterfactual profiles that differ only in
+epistemic state and evaluates held-out backgrounds, assertion templates, and
+clinical concepts. A complementary MIMIC-IV analysis separates structured
+laboratory state from textual observation in deidentified discharge summaries
+\citep{johnson-etal-2023-mimiciv,johnson-etal-2023-mimicnote}. Together, the two
+layers provide internal control and real-note relevance: SilentEHR isolates
+where a binary decision boundary sends non-observation, while MIMIC-IV tests a
+related documentation-mismatch consequence under imperfect observation labels.
+
+The results reveal a reproducible separation between direction, confidence, and
+geometry. Several dense encoders send more than 90\% of Unmentioned profiles to
+Refuted, often confidently, although their Unmentioned embeddings do not
+collapse toward the Refuted centroid. The behavior persists after controlling
+text length, evidence position, and direct lexical assertions, but varies across
+encoders, concepts, and fine-grained Unknown states. On human-consensus MIMIC-IV
+concepts, dense encoders also predict clinical absence for 41--55\% of
+structured-positive cases labeled textually unmentioned, while confidence does
+not reliably distinguish observed from unmentioned notes.
+
+Our contributions are threefold. First, we introduce SilentEHR, an 11{,}466-pair
+controlled audit benchmark with matched epistemic states and multiple transfer
+protocols. Second, we propose diagnostics that separately measure extrapolation
+direction, confidence extremity, and representation geometry, and show that
+these quantities need not agree. Third, we combine structured-grounded MIMIC-IV
+validation, a 300-case dual-annotator audit, and mitigation experiments showing
+that explicit Unknown supervision is substantially more effective than
+confidence- or distance-based abstention.
+
+\section{Datasets}
+Table~\ref{tab:datasets} summarizes the two evaluation layers. SilentEHR
+isolates CWE under controlled censoring; MIMIC-IV tests a related
+documentation-mismatch consequence in real notes.
+
+
+\begin{table}[t]
+  \centering
+  \footnotesize
+  \renewcommand{\arraystretch}{1.06}
+  \caption{Evaluation layers.}
+  \label{tab:datasets}
+  \begin{tabular*}{\columnwidth}{@{\extracolsep{\fill}}lcc@{}}
+    \toprule
+    & \textbf{SilentEHR} & \textbf{MIMIC-IV} \\
+    \midrule
+    Contexts & 80 synthetic & 13.8k admissions \\
+    Concepts & 16 & 3 laboratory \\
+    Pairs & 11,466 & 38,043 \\
+    States & S/R/U/NA/Unc & $C^{\pm}O^{\pm}$ \\
+    Observation & controlled & Qwen3-14B \\
+    Split & background--concept & subject \\
+    \bottomrule
+  \end{tabular*}
+\end{table}
+
+
+\subsection{SilentEHR}
+Sixteen concepts are crossed with 80 target-neutral backgrounds. After removing
+six contaminated background--concept pairs, each of 1{,}274 pairs yields two
+Supported, two Refuted, two Not-assessed, two Uncertain, and one Unmentioned
+variant, totaling 11{,}466 examples. IID assignment is performed at the
+background--concept-family level using a stable hash; all state and template
+realizations of one family remain in the same fold. The primary split trains on
+56 backgrounds, validates on 12, and tests on 12; template-held-out and
+concept-held-out protocols provide complementary tests. Concepts span symptoms,
+allergies, medications, disease states, and safety conditions.
+
+Three regenerated tiers control common artifacts. Length matching adds a
+concept-neutral sentence to Unmentioned profiles, reducing the clean-tier
+length gap from 5.8 words to less than one word. Random-position evidence
+removes the fixed final-sentence cue. Indirect evidence replaces explicit
+assertions with laboratory values or medication events. The full corpus and
+binary head are regenerated and retrained for each tier.
+
+\paragraph{Matched-family example.}
+Each background--concept pair shares one synthetic background; only the final
+state sentence changes (Appendix~\ref{app:matched_family}).
+Table~\ref{tab:matched_family_compact} shows the \texttt{penicillin\_allergy}
+family on background~0 (\texttt{p01440--p01448} in \texttt{controlled\_full.jsonl}).
+
+\begin{table}[t]
+  \centering
+  \footnotesize
+  \renewcommand{\arraystretch}{1.08}
+  \caption{Compact matched-family example (background~0, penicillin allergy).}
+  \label{tab:matched_family_compact}
+  \begin{tabular*}{\columnwidth}{@{\extracolsep{\fill}}lp{0.62\columnwidth}@{}}
+    \toprule
+    \textbf{State} & \textbf{Example realization (verbatim)} \\
+    \midrule
+    Proposition & ``The patient has a penicillin allergy.'' \\
+    Supported & ``A penicillin allergy is documented.'' \\
+    Refuted & ``The record states no known penicillin allergy.'' \\
+    Not assessed & ``Penicillin allergy status was not documented.'' \\
+    Uncertain & ``The reported penicillin allergy could not be confirmed.'' \\
+    Unmentioned & Shared background only; no penicillin sentence appended. \\
+    \bottomrule
+  \end{tabular*}
+\end{table}
+
+\subsection{MIMIC-IV}
+We use MIMIC-IV and MIMIC-IV-Note
+\citep{johnson-etal-2023-mimiciv,johnson-etal-2023-mimicnote}, pairing discharge
+summaries with the final laboratory measurement within 24 hours of discharge: hemoglobin $<10$ g/dL, platelets
+$<100\times10^9$/L, or potassium $>5.5$ mmol/L. Qwen3-14B assigns one of seven observation statuses from the full note:
+current positive, current negative, unmentioned, admission-only, historical,
+uncertain, or temporally conflicting (Appendix~\ref{app:observation_labeling}).
+
+Two experiments use these labels differently.
+For the \emph{direct textual S/R/U bridge} (Appendix~\ref{app:real_sru}),
+\emph{unmentioned}, \emph{admission-only}, \emph{historical-only},
+\emph{uncertain}, and \emph{temporal-conflict} all map to Unknown.
+For the separate \emph{structured-state} $C\times O$ analysis
+(Appendix~\ref{app:mimic_controls}), uncertain, historical-only,
+admission-only, and temporal-conflict cases are \emph{excluded} from binary
+classifier training and evaluation to avoid conflating observation ambiguity
+with laboratory-state prediction; only clean observed-positive/negative and
+unmentioned cells enter that protocol.
+Full notes are encoded by mean pooling overlapping 4,800-character chunks with
+400-character overlap.
+
+Two graduate-student annotators independently label 300 stratified anemia and
+thrombocytopenia cases under a blind protocol (Appendix~\ref{app:annotation_protocol}):
+150 anemia + 150 thrombocytopenia, using the same seven-class schema and quoting
+evidence for every non-\emph{unmentioned} label. We report human--human
+agreement, human--LLM agreement, dual-annotator consensus labels
+($n=305$ after a 50-pair non-laboratory expansion; 255 from the original audit),
+binary mentioned/unmentioned metrics, and the precision of LLM-predicted $O^-$.
+Because the audit is stratified, we additionally reweight precision to the MIMIC
+test distribution.
+
+\section{Methods}
+\subsection{Closed-world extrapolation}
+For record $x$ and proposition $h$, the target is
+$y(x,h)\in\{S,R,U\}$. Training uses only Supported and Refuted cases.
+UNR is the fraction of Unmentioned cases predicted Refuted; HCUNR@0.9 applies a
+0.9 confidence threshold. Detection AUROC uses low maximum class probability as
+a non-observation score. Matched ECI, $1-d(U,R)/d(S,R)$ in PCA--Ledoit--Wolf Mahalanobis space,
+measures whether Unmentioned embeddings collapse toward Refuted. Negative ECI
+means that high UNR cannot be explained by global proximity to Refuted. We also
+project examples onto the learned logistic-regression axis to distinguish
+global geometry from supervised extrapolation along the decision direction.
+
+\subsection{Encoders and classifier}
+We evaluate TF--IDF; Bio\_ClinicalBERT
+\citep{alsentzer-etal-2019-clinicalbert}; BioLORD
+\citep{remy-etal-2022-biolord}; MedCPT \citep{jin-etal-2023-medcpt};
+Qwen3-Embedding-0.6B \citep{zhang-etal-2025-qwen3embedding}; Jina v5
+\citep{akram-etal-2026-jinav5}; and med-gte-hybrid
+\citep{reimers-gurevych-2019-sentence,medaihs-2025-medgte}, all with frozen
+weights. Pair features are
+$[e_x;e_h;|e_x-e_h|;e_x\odot e_h]$. The primary head is class-balanced $\ell_2$-regularized logistic regression
+on standardized features, fitted only to Supported and Refuted training pairs.
+Robustness tests vary regularization strength, PCA dimension, $k$NN and
+nearest-centroid heads, and temperature scaling. Neural encoder weights remain
+frozen in every experiment.
+
+\subsection{Evaluation protocol}
+All preprocessing, standardization, dimensionality reduction, and decision
+thresholds are fitted on the training or validation partition only. The primary
+SilentEHR result uses one fixed background split for direct model comparison.
+We then redraw ten background splits and four disjoint concept folds to test
+partition sensitivity, retraining the classifier on cached embeddings.
+Background--concept bootstrap intervals (2{,}000 replicates, resampling unit =
+background$\times$concept family) preserve the matched counterfactual
+unit; matched variants are never treated as independent samples.
+Known-state accuracy is always reported with unknown-state behavior so
+that high UNR cannot be attributed to failure on explicit evidence.
+We report a 0.5 UNR reference as a \emph{directional} threshold (whether
+silence is mapped toward Refuted), not as a null model of random
+three-way classification performance.
+
+Confidence-based detection uses maximum class probability, a common baseline
+for error and out-of-distribution detection \citep{hendrycks-gimpel-2017-baseline},
+without access to Unknown examples. Confidence abstention selects a validation threshold
+that retains 95\% of known cases. Mahalanobis detection follows class-conditional distance-based OOD scoring
+\citep{lee-etal-2018-mahalanobis}, using PCA and a Ledoit--Wolf covariance
+estimate fitted to known training representations. These
+settings deliberately test whether a conventional binary pipeline can recognize
+non-observation after training, rather than giving the detector labeled Unknown
+examples.
+
+\subsection{MIMIC state--observation evaluation}
+Clinical state $C$ comes from laboratories and observation $O$ from Qwen3-14B.
+This structured $C\times O$ protocol (Appendix~\ref{app:mimic_controls}) is
+separate from the direct textual S/R/U bridge in Appendix~\ref{app:real_sru}.
+Training uses $C^+O^+$ and $C^-O^+$ on clean observed-positive/negative cells;
+evaluation adds LLM-labeled $C^+O^-$ and $C^-O^-$ where the concept is
+\emph{unmentioned} near discharge. Uncertain, historical-only, admission-only,
+and temporal-conflict labels are excluded here (but map to Unknown in the S/R/U
+bridge). Subject-level 70/30 splits prevent leakage, and neural models cap each
+concept--state cell at 500 cases. The main result pools the two audited concepts
+($n=75$ positive $O^-$ cases); hyperkalemia is exploratory.
+
+UPFNR is $1-\mathrm{Recall}(C^+\mid O^-)$, HCWE is the high-confidence wrong
+negative rate, and the documentation gap compares recall on observed and
+LLM-labeled unmentioned cases. Observation-detection AUROC uses model
+confidence to separate $O^-$ from $O^+$. These quantities measure
+documentation-sensitive behavior rather than hidden-laboratory recovery.
+
+A proposition-only classifier and a concept-prior baseline test whether low
+UPFNR can be obtained by ignoring patient text. Label-noise sensitivity uses
+the cohort-weighted $O^-$ precision $q=.60$ as a conservative setting. We
+report both a missing-at-random deletion scenario and worst-case
+partial-identification bounds that allow incorrect $O^-$ labels to concentrate
+on model errors or correct predictions.
+
+MIMIC confidence intervals use subject-level bootstrap sampling (2{,}000
+replicates) and pool concept results by the number of structured-positive $O^-$
+cases. Real-note S/R/U gold uses Wilson 95\% intervals for binomial rates on
+pooled out-of-fold predictions. The human-consensus headline excludes
+hyperkalemia because its positive $O^-$ test cell contains only five cases;
+the three-concept result remains in the exploratory table.
+For the 300 audited rows, we additionally recompute UPFNR using each annotator,
+their consensus, union, and intersection definitions of $O^-$. These small
+subsets are treated as directional sensitivity analyses rather than precise
+effect-size estimates.
+
+\subsection{Mitigation}
+We compare temperature scaling \citep{guo-etal-2017-calibration}, confidence
+and Mahalanobis abstention,
+and three-way training with 10, 50, or 100 Unknown semantic groups over ten
+seeds. An oracle observation gate provides an upper bound by abstaining on
+Unknown while preserving binary predictions for known states.
+
+\section{Results}
+\subsection{Controlled benchmark}
+Table~\ref{tab:controlled} shows strong but non-universal negative
+extrapolation. Qwen3-Emb and BioLORD reach Unmentioned UNR .94 [.90,.98] and
+.99 [.98,1.00] (family-bootstrap 95\% CI on the new-background split) while
+maintaining known accuracy above .97. Not-assessed behaves similarly, whereas
+Uncertain is encoder-dependent (Jina: .18). Med-gte is a clean-tier
+counterexample (.38), although its rate rises under position and indirect
+controls. Detection AUROC is at or below chance for several high-UNR encoders:
+Jina reaches .498, BioLORD .184, and MedCPT .300. Only BioLORD has positive
+ECI; Qwen and Jina remain negative despite strong directional failure.
+Decision-axis logits further show that Jina maps Uncertain toward Supported
+while leaving Unmentioned strongly negative. Thus Unknown states are not
+monolithic, and prediction direction, confidence, and global geometry do not
+coincide.
+
+
+\begin{table*}[t]
+  \centering
+  \footnotesize
+  \renewcommand{\arraystretch}{1.07}
+  \caption{SilentEHR new-background results. U, NA, and Unc denote
+  Unmentioned, Not-assessed, and Uncertain. Direction columns report the
+  fraction predicted Refuted; HC uses a 0.9 confidence threshold. Det. is
+  Unmentioned detection AUROC and ECI is the matched collapse index.}
+  \label{tab:controlled}
+  \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}lrrrrrrrrr@{}}
+    \toprule
+    & & \multicolumn{3}{c}{\textbf{Predicted Refuted}} &
+    \multicolumn{3}{c}{\textbf{HC Refuted}} & & \\
+    \cmidrule(lr){3-5}\cmidrule(lr){6-8}
+    \textbf{Encoder} & \textbf{Known} &
+    \textbf{U} & \textbf{NA} & \textbf{Unc} &
+    \textbf{U} & \textbf{NA} & \textbf{Unc} &
+    \textbf{Det.} & \textbf{ECI} \\
+    \midrule
+    TF--IDF      & 1.00 & .69 & .69 & .69 & .45 & .23 & .46 & .999 & $-.29$ \\
+    ClinicalBERT & .98 & .60 & .32 & .55 & .27 & .20 & .24 & .866 & $-1.16$ \\
+    Qwen3-Emb    & .98 & .94 & .91 & .56 & .88 & .86 & .48 & .657 & $-.15$ \\
+    Jina v5      & .96 & .91 & .72 & .18 & .81 & .46 & .07 & .498 & $-.94$ \\
+    BioLORD      & .99 & .99 & .77 & .65 & .99 & .64 & .56 & .184 & $.10$ \\
+    MedCPT       & .89 & .79 & .19 & .43 & .72 & .11 & .31 & .300 & $-3.95$ \\
+    med-gte      & 1.00 & .38 & .47 & .53 & .16 & .26 & .25 & .747 & $-2.16$ \\
+    \bottomrule
+  \end{tabular*}
+\end{table*}
+
+
+\subsection{Stability and heterogeneity}
+Across ten background splits, Qwen, Jina, BioLORD, and TF--IDF exceed UNR .5
+in every split, with means of .90, .85, .97, and .71; med-gte remains below .5
+in all splits (.34). Four concept folds show the same family-level pattern.
+Qwen, Jina, and BioLORD also predict Refuted for Unmentioned examples in all 12
+training concepts, whereas med-gte does so in four. Its apparent safety is
+concentrated in allergy and medication concepts, while disease concepts remain
+high (.92), and disappears under indirect evidence. Full split and concept
+results are in the appendix.
+
+The concept-fold results also remain high for the strongest encoders, indicating
+that the binary direction transfers beyond the concepts used to fit the head.
+However, the med-gte counterexample cautions against treating CWE as universal:
+encoder objectives and lexical realization materially change whether silence is
+mapped to Refuted, Supported, or a low-margin region.
+
+\subsection{Artifact controls}
+Table~\ref{tab:artifact} summarizes the three artifact-resistant tiers.
+Length matching leaves Qwen, Jina, and BioLORD UNR at .88, .80, and .99.
+Randomized position also preserves the strongest failures. Indirect evidence reduces Qwen and BioLORD modestly but leaves Jina at .91;
+TF--IDF rises to 1.00, consistent with strong lexical reliance. Known-state
+accuracy remains high for the headline dense encoders in the length-matched and
+indirect tiers. CWE therefore cannot be explained by sentence count, fixed
+position, or direct target wording alone.
+
+
+\begin{table}[t]
+  \centering
+  \scriptsize
+  \setlength{\tabcolsep}{2.5pt}
+  \renewcommand{\arraystretch}{1.05}
+  \caption{Unmentioned-to-Refuted rate under artifact controls.}
+  \label{tab:artifact}
+  \begin{tabular*}{\columnwidth}{@{\extracolsep{\fill}}lrrrr@{}}
+    \toprule
+    \textbf{Encoder} & \textbf{Clean} & \textbf{Length} &
+    \textbf{Position} & \textbf{Indirect} \\
+    \midrule
+    TF--IDF      & .688 & .688 & .688 & 1.000 \\
+    ClinicalBERT & .597 & .764 & .153 & .833 \\
+    Qwen3-Emb    & .944 & .882 & .944 & .785 \\
+    Jina v5      & .910 & .799 & .993 & .910 \\
+    BioLORD      & .993 & .993 & 1.000 & .861 \\
+    MedCPT       & .792 & .951 & .757 & .868 \\
+    med-gte      & .382 & .139 & .590 & .785 \\
+    \bottomrule
+  \end{tabular*}
+\end{table}
+
+
+\subsection{MIMIC-IV}
+Table~\ref{tab:mimic} reports pooled results for the two audited concepts, and
+Table~\ref{tab:mimic_concept} gives the concept-level and exploratory pooled
+breakdown. On the audited concepts, dense-model UPFNR ranges from .413 to .547, HCWE from
+.320 to .467, and observation-detection AUROC from .452 to .501. The proposition-only control obtains UPFNR .06 by predicting positive on
+94\% of $C^+O^-$ cases, but its macro cell accuracy is only .65 versus .74 for
+the patient-text model. Patient text therefore improves structured-state
+discrimination without resolving documentation-sensitive errors. Encoder
+rankings also differ from SilentEHR: Qwen has the lowest dense MIMIC UPFNR
+despite one of the highest controlled UNR values. Results do not claim that
+unavailable laboratories should be inferred; they show that LLM-labeled textual
+absence is often mapped to clinical negativity.
+
+
+\begin{table}[t]
+  \centering
+  \scriptsize
+  \setlength{\tabcolsep}{2.2pt}
+  \renewcommand{\arraystretch}{1.06}
+  \caption{MIMIC-IV results on the audited concepts. Brackets show the
+  subject-bootstrap 95\% CI for UPFNR.}
+  \label{tab:mimic}
+  \begin{tabular*}{\columnwidth}{@{\extracolsep{\fill}}lcccc@{}}
+    \toprule
+    \textbf{Encoder} & \textbf{UPFNR [CI]} &
+    \textbf{HCWE} & \textbf{Gap} & \textbf{Det.} \\
+    \midrule
+    TF--IDF      & .653 [.49,.81] & .453 & .543 & .574 \\
+    ClinicalBERT & .547 [.39,.69] & .467 & .207 & .452 \\
+    Qwen3-Emb    & .440 [.29,.59] & .320 & .181 & .501 \\
+    Jina v5      & .413 [.27,.56] & .320 & .158 & .480 \\
+    BioLORD      & .533 [.38,.67] & .347 & .214 & .486 \\
+    MedCPT       & .533 [.38,.68] & .427 & .251 & .459 \\
+    med-gte      & .493 [.35,.66] & .347 & .166 & .474 \\
+    \bottomrule
+  \end{tabular*}
+\end{table}
+
+
+
+\begin{table*}[t]
+  \centering
+  \footnotesize
+  \renewcommand{\arraystretch}{1.07}
+  \caption{UPFNR by MIMIC-IV concept and pooled subset. Hyperkalemia is
+  exploratory because only five structured-positive $O^-$ cases are available.}
+  \label{tab:mimic_concept}
+  \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}lrrrrrrrr@{}}
+    \toprule
+    \textbf{Subset} & \textbf{$n$} & \textbf{TF--IDF} &
+    \textbf{ClinBERT} & \textbf{Qwen} & \textbf{Jina} &
+    \textbf{BioLORD} & \textbf{MedCPT} & \textbf{med-gte} \\
+    \midrule
+    Anemia           & 61 & .69 & .56 & .44 & .44 & .48 & .52 & .49 \\
+    Thrombocytopenia & 14 & .50 & .50 & .43 & .29 & .79 & .57 & .50 \\
+    Audited pooled   & 75 & .653 & .547 & .440 & .413 & .533 & .533 & .493 \\
+    \midrule
+    Hyperkalemia     &  5 & .60 & 1.00 & .60 & .80 & 1.00 & 1.00 & .80 \\
+    All three pooled & 80 & .650 & .575 & .450 & .438 & .562 & .562 & .512 \\
+    \bottomrule
+  \end{tabular*}
+\end{table*}
+
+
+Subject-bootstrap intervals exclude zero for all reported UPFNR estimates.
+At the conservative label-precision setting $q=.60$, worst-case lower bounds
+remain positive but approach zero for Qwen (.07) and Jina (.02), leaving their
+noise-adjusted magnitudes uncertain. Because anemia contributes 61 of the 75
+audited positive-$O^-$ cases and hyperkalemia has only five, we emphasize the
+cross-model pattern and confidence-detection failure rather than small ranking
+differences. These cells contain audited but disputed observation labels, not
+gold textual silence.
+
+\subsection{Human audit}
+Table~\ref{tab:audit} summarizes agreement among the two annotators and
+Qwen3-14B. Human annotators agree strongly ($\kappa=.80$). Agreement with Qwen3-14B is
+moderate for seven statuses but stronger after collapsing to mentioned versus
+unmentioned. Consensus binary accuracy is 89.0\% with $\kappa=.58$. Consensus $O^-$
+precision and recall are both .65; per-annotator precision is .55. Reweighting
+to the test distribution gives precision .60 [95\% CI .42,.78]. The main
+disagreement is temporal, especially admission-only versus current evidence,
+rather than whether the concept appears anywhere. All seven consensus structured-positive cases labeled $O^-$ by Qwen are
+human-confirmed, but the subset is too small for precise estimation. The audit
+therefore supports the coarse observation distinction while showing why MIMIC
+effect sizes must remain qualified; consensus labels are available only for the
+sampled rows.
+
+
+\begin{table}[t]
+  \centering
+  \scriptsize
+  \setlength{\tabcolsep}{2.2pt}
+  \renewcommand{\arraystretch}{1.06}
+  \caption{Human agreement with Qwen3-14B observation labels. Entries in
+  the middle columns are accuracy/$\kappa$.}
+  \label{tab:audit}
+  \begin{tabular*}{\columnwidth}{@{\extracolsep{\fill}}lccc@{}}
+    \toprule
+    \textbf{Comparison} & \textbf{7-class} &
+    \textbf{Binary} & \textbf{$O^-$ P/R/F1} \\
+    \midrule
+    H1 vs LLM   & 53.7/.39 & 88.3/.53 & .55/.65/.60 \\
+    H2 vs LLM   & 54.7/.39 & 87.3/.50 & .55/.60/.58 \\
+    Mean vs LLM & 54.2/.39 & 87.8/--- & --- \\
+    Consensus   & 59.2/.44 & 89.0/.58 & .65/.65/.65 \\
+    H1 vs H2    & 85.0/.80 & 99.0/.96 & --- \\
+    \bottomrule
+  \end{tabular*}
+\end{table}
+
+
+\subsection{Robustness and mitigation}
+Alternative heads and regularization preserve high UNR for Qwen, Jina, and
+BioLORD (.71--.99), although HCUNR can change sharply after calibration. This
+supports a robust directional effect but not a calibration-invariant confidence
+claim. Thresholds were fitted using known training examples only: the
+confidence threshold was the fifth percentile of training maximum scores, and
+the Mahalanobis threshold was the 95th percentile of training distances.
+These choices target 95\% training coverage; held-out known coverage is
+reported separately. Confidence abstention rejects only 3.5--39.6\% of
+Unmentioned inputs for the neural encoders, yet accepted-set Unmentioned UNR
+remains $\geq$.83 for Qwen3-Emb, Jina v5, BioLORD, and MedCPT
+(Table~\ref{tab:abstention})---rejection does not preferentially remove
+high-confidence CWE. Mahalanobis rejection is near zero. Unknown supervision
+produces a clear dose-dependent reduction in Refuted-directed extrapolation,
+with most of the improvement emerging between 10 and 50 semantic groups
+(Table~\ref{tab:mitigation}); Qwen Unmentioned UNR falls from .944 to .058
+while known accuracy stays above .98 at 50 groups.
+
+
+\begin{table}[t]
+  \centering
+  \scriptsize
+  \setlength{\tabcolsep}{2pt}
+  \renewcommand{\arraystretch}{1.05}
+  \caption{Confidence and Mahalanobis abstention on new-background transfer.
+  Thresholds fit on known training cases only (5th-percentile confidence;
+  95th-percentile Mahalanobis distance), targeting 95\% training coverage.
+  Held-out known coverage and accepted-set Unmentioned UNR
+  $P(\hat{y}{=}R \mid U_{\mathrm{unm}}, \mathrm{not\ rejected})$ are reported
+  separately.}
+  \label{tab:abstention}
+  \begin{tabular*}{\columnwidth}{@{\extracolsep{\fill}}lcccc@{}}
+    \toprule
+    \textbf{Encoder} & \textbf{Known cov.} &
+    \textbf{Unm.\ reject} & \textbf{Acc.\ UnmRR} &
+    \textbf{Maha.\ reject} \\
+    \midrule
+    TF--IDF      & 1.00 & .98 & .00 & .00 \\
+    ClinicalBERT & .89 & .79 & .73 & .00 \\
+    Qwen3-Emb    & .96 & .28 & .97 & .00 \\
+    Jina v5      & .85 & .40 & 1.00 & .00 \\
+    BioLORD      & .95 & .04 & 1.00 & .00 \\
+    MedCPT       & .84 & .13 & .83 & .00 \\
+    med-gte      & .95 & .72 & .05 & .25 \\
+    \bottomrule
+  \end{tabular*}
+\end{table}
+
+
+\begin{table}[t]
+  \centering
+  \scriptsize
+  \setlength{\tabcolsep}{2pt}
+  \renewcommand{\arraystretch}{1.05}
+  \caption{Unknown supervision on new-background transfer (10-seed mean).
+  Base column is Unmentioned UNR under binary training.}
+  \label{tab:mitigation}
+  \begin{tabular*}{\columnwidth}{@{\extracolsep{\fill}}lcccc@{}}
+    \toprule
+    \textbf{Encoder} & \textbf{Base} &
+    \textbf{10 grp} & \textbf{50 grp} & \textbf{100 grp} \\
+    \midrule
+    \multicolumn{5}{l}{\emph{UNR}} \\
+    Qwen3-Emb & .944 & .410 & .058 & .026 \\
+    Jina v5   & .910 & .539 & .224 & .112 \\
+    BioLORD   & .993 & .672 & .294 & .135 \\
+    MedCPT    & .792 & .433 & .282 & .201 \\
+    med-gte   & .382 & .372 & .030 & .011 \\
+    \midrule
+    \multicolumn{5}{l}{\emph{Unknown recall}} \\
+    Qwen3-Emb & --- & .517 & .888 & .923 \\
+    Jina v5   & --- & .129 & .667 & .857 \\
+    BioLORD   & --- & .162 & .587 & .785 \\
+    MedCPT    & --- & .103 & .513 & .714 \\
+    med-gte   & --- & .288 & .919 & .984 \\
+    \midrule
+    \multicolumn{5}{l}{\emph{Known accuracy}} \\
+    Qwen3-Emb & --- & .983 & .982 & .983 \\
+    Jina v5   & --- & .960 & .962 & .962 \\
+    BioLORD   & --- & .988 & .989 & .986 \\
+    MedCPT    & --- & .892 & .894 & .899 \\
+    med-gte   & --- & .991 & .973 & .972 \\
+    \bottomrule
+  \end{tabular*}
+\end{table}
+
+
+Held-out-concept transfer is harder but remains effective for Qwen
+(UNR .20; Unknown recall .75).
+
+\section{Related Work}
+\subsection{Clinical inference and assertion status}
+General NLI benchmarks model entailment, contradiction, and neutral relations
+\citep{bowman-etal-2015-large,williams-etal-2018-broad}. MedNLI transfers this
+formulation to patient histories \citep{romanov-shivade-2018-lessons}, while
+NLI4CT extends clinical inference to long trial reports and evidence selection
+\citep{jullien-etal-2023-nli4ct}. These resources train and evaluate the neutral
+class directly. Clinical assertion detection instead assigns mentioned entities
+statuses such as present, possible, or absent
+\citep{van-aken-etal-2021-assertion}; earlier work also extracts explicit
+``evidence of absence'' from notes \citep{carter-etal-2016-evidence}. SilentEHR
+addresses a different regime: the target proposition is not observed, and the
+downstream classifier has been trained only on Supported and Refuted cases. The
+question is therefore not whether a supervised Neutral label can be recognized,
+but where a closed-world decision boundary sends non-observation.
+
+\subsection{Clinical and biomedical representations}
+Domain-specific pretraining has produced clinical contextual encoders such as
+ClinicalBERT \citep{alsentzer-etal-2019-clinicalbert}, ontology-grounded
+biomedical sentence representations such as BioLORD
+\citep{remy-etal-2022-biolord}, and search-log-trained biomedical retrievers such
+as MedCPT \citep{jin-etal-2023-medcpt}. Recent general embedding models use
+large-scale contrastive training, instruction conditioning, and distillation,
+including Qwen3-Embedding \citep{zhang-etal-2025-qwen3embedding} and Jina v5
+\citep{akram-etal-2026-jinav5}. Their evaluations emphasize semantic
+similarity, retrieval, clustering, or classification. Our analysis is
+complementary: encoder weights remain frozen, and we audit how a supervised
+binary head extrapolates to an epistemic state excluded from training. Strong
+benchmark embeddings can therefore still exhibit unsafe closed-world behavior.
+
+\subsection{Missingness, selective prediction, and OOD detection}
+Missingness in structured EHR time series can itself be informative and has
+been modeled explicitly, for example with GRU-D \citep{che-etal-2018-grud}.
+Textual non-observation is related but distinct: a concept can be absent from a
+note because it was not assessed, not relevant to that document, historical, or
+simply omitted. Selective prediction and OOD detection commonly use maximum
+class probability \citep{hendrycks-gimpel-2017-baseline}, calibrated confidence
+\citep{guo-etal-2017-calibration}, learned reject options
+\citep{geifman-el-yaniv-2019-selectivenet}, or class-conditional Mahalanobis
+distance \citep{lee-etal-2018-mahalanobis}. SilentEHR tests a harder boundary
+case for these methods: Unmentioned profiles are linguistically and clinically
+in-domain, but their evidence-coverage state is outside the binary training
+support. Our findings show why low confidence or global distance need not track
+the semantic direction induced by the downstream head.
+
+\section{Discussion}
+CWE is primarily a directional extrapolation failure, not a universal geometric
+collapse. Its severity depends on encoder, epistemic state, concept family, and
+evidence realization. MIMIC-IV shows a related real-note consequence, but
+encoder rankings differ from SilentEHR and observation labels remain imperfect.
+Accordingly, MIMIC $C^+O^-$ cells should be interpreted as structured
+positives with disputed textual silence, not as a gold set of undocumented
+facts. The controlled benchmark supplies internal validity, whereas MIMIC-IV
+tests ecological relevance under noisier observation labels. Explicit Unknown
+supervision is more effective than generic confidence or distance rejection,
+suggesting that coverage state must be learned rather than recovered from a
+binary model after deployment.
+
+\section{Conclusion}
+Frozen binary verifiers often map non-observation to Refuted, but the effect
+varies across encoders, concepts, and epistemic states. SilentEHR separates
+direction from confidence and geometry, while MIMIC-IV demonstrates a related
+documentation-mismatch risk in real notes. Clinical verification systems should
+represent and supervise non-observation explicitly.
+
+\section*{Ethics Statement}
+MIMIC-IV and MIMIC-IV-Note are used under their data-use agreements; all notes
+are de-identified. Human annotations were collected only for label validation
+by two graduate-student annotators working independently under a blind protocol
+(Appendix~\ref{app:annotation_protocol}); no third adjudicator was involved.
+Disagreements were excluded from consensus gold rather than resolved by a senior
+reviewer.
+
+\section*{Limitations}
+SilentEHR uses synthetic backgrounds and 16 concepts. MIMIC-IV covers three
+near-discharge laboratory concepts, while the human audit covers two.
+Qwen3-14B observation labels remain imperfect; 45 original audit disagreements
+were excluded rather than adjudicated by a third annotator, and the
+human-confirmed positive-$O^-$ subset is small.
+Hyperkalemia estimates are unstable because only five positive $O^-$ cases are
+available. Finally, Unknown supervision requires labeled examples or semantic
+groups that may be unavailable in deployment.
+
+\bibliography{silent_ehr_refs}
+\bibliographystyle{acl_natbib}
+
+\appendix
+\section{Evaluation Protocols}
+\label{app:protocols}
+Table~\ref{tab:protocols} summarizes the four SilentEHR split protocols.
+
+\begin{table}[!htbp]
+  \centering
+  \footnotesize
+  \renewcommand{\arraystretch}{1.08}
+  \caption{SilentEHR evaluation protocols.}
+  \label{tab:protocols}
+  \begin{tabular*}{\columnwidth}{@{\extracolsep{\fill}}lcc@{}}
+    \toprule
+    \textbf{Protocol} & \textbf{Held out} & \textbf{U at test?} \\
+    \midrule
+    New background & 12/80 backgrounds & Yes \\
+    IID & background$\times$concept groups & Yes \\
+    New template & assertion templates & No \\
+    New concept & 4/16 concepts & Yes \\
+    \bottomrule
+  \end{tabular*}
+\end{table}
+
+\section{MIMIC State--Observation Cell Design}
+\label{app:mimic_controls_detail}
+The four-cell design used in the structured-state MIMIC analysis
+(Appendix~\ref{app:mimic_controls}) is defined as follows. Training cells:
+$C^+O^+$, $C^-O^+$.
+Evaluation adds $C^+O^-$ and $C^-O^-$ where structured laboratories indicate
+abnormality/normality but Qwen3-14B marks the concept \emph{unmentioned} in the
+discharge note.
+Historical-only, uncertain, admission-only, and temporal-conflict Qwen3-14B
+labels are excluded from this binary protocol (but map to Unknown in the
+separate direct S/R/U bridge; Appendix~\ref{app:real_sru}).
+
+\section{Per-Concept Unmentioned UNR}
+\label{app:concept_unr}
+
+Twelve concepts appear in the new-background training split; four held-out
+concepts are evaluated under the new-concept protocol (Table~\ref{tab:protocols}).
+Qwen3-Embedding, Jina v5, and BioLORD predict Refuted for Unmentioned inputs in
+all 12 training concepts, whereas med-gte exceeds 0.5 in only four. The med-gte
+contrast is concentrated in allergy and medication concepts, while disease
+concepts remain strongly negative (Tables~\ref{tab:concept_unr} and
+\ref{tab:concept_group}). Its allergy advantage disappears under the
+indirect-evidence tier, indicating evidence-realization sensitivity rather than
+a stable abstention policy.
+
+\begin{table*}[t]
+  \centering
+  \scriptsize
+  \renewcommand{\arraystretch}{1.04}
+  \caption{Clean-tier Unmentioned-to-Refuted rate by concept.}
+  \label{tab:concept_unr}
+  \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}lrrrrrrr@{}}
+    \toprule
+    \textbf{Concept} & \textbf{TF--IDF} & \textbf{ClinBERT} &
+    \textbf{Qwen} & \textbf{Jina} & \textbf{BioLORD} &
+    \textbf{MedCPT} & \textbf{med-gte} \\
+    \midrule
+    Chest pain & .92 & .75 & .83 & 1.00 & 1.00 & .17 & .50 \\
+    Fever & .92 & .33 & 1.00 & 1.00 & 1.00 & .08 & .08 \\
+    Penicillin allergy & .00 & .17 & 1.00 & 1.00 & 1.00 & 1.00 & .00 \\
+    Active bleeding & .92 & .92 & 1.00 & 1.00 & 1.00 & 1.00 & .58 \\
+    Anticoagulation & .92 & .92 & .92 & .75 & 1.00 & 1.00 & .08 \\
+    Renal dysfunction & .92 & .92 & .92 & 1.00 & .92 & 1.00 & .83 \\
+    Nausea & .92 & .17 & 1.00 & 1.00 & 1.00 & .75 & 1.00 \\
+    Sulfonamide allergy & .00 & .83 & .92 & 1.00 & 1.00 & 1.00 & .00 \\
+    Latex allergy & .00 & .17 & 1.00 & 1.00 & 1.00 & 1.00 & .00 \\
+    Insulin therapy & .92 & .17 & .92 & 1.00 & 1.00 & 1.00 & .00 \\
+    Antiplatelet therapy & .92 & .92 & .83 & .58 & 1.00 & 1.00 & .50 \\
+    Cognitive impairment & .92 & .92 & 1.00 & .58 & 1.00 & .50 & 1.00 \\
+    \midrule
+    Concepts $>.5$ & 9 & 7 & 12 & 12 & 12 & 9 & 4 \\
+    \bottomrule
+  \end{tabular*}
+\end{table*}
+
+\begin{table}[!htbp]
+  \centering
+  \footnotesize
+  \renewcommand{\arraystretch}{1.08}
+  \caption{Mean Unmentioned-to-Refuted rate by concept family.}
+  \label{tab:concept_group}
+  \begin{tabular*}{\columnwidth}{@{\extracolsep{\fill}}lrrrr@{}}
+    \toprule
+    \textbf{Family} & \textbf{Qwen} & \textbf{BioLORD} &
+    \textbf{med-gte} & \textbf{gte-ind.} \\
+    \midrule
+    Symptom    & .94 & 1.00 & .53 & 1.00 \\
+    Allergy    & .97 & 1.00 & .00 & 1.00 \\
+    Medication & .89 & 1.00 & .19 & .39 \\
+    Disease    & .96 & .96 & .92 & 1.00 \\
+    Safety     & 1.00 & 1.00 & .58 & .25 \\
+    \bottomrule
+  \end{tabular*}
+\end{table}
+
+\FloatBarrier
+
+\section{Unknown-State Decision-Axis Logits}
+\label{app:unknown_logit}
+
+Positive logits favor Supported and negative logits favor Refuted. Qwen3-Embedding
+and BioLORD place both Unmentioned and Not-assessed strongly on the Refuted side.
+Jina v5 instead separates explicit uncertainty from silence: its mean logit is
+positive for Uncertain but strongly negative for Unmentioned. These results show
+that the three Unknown states are represented differently even when the binary
+head maps several of them to the same class (Table~\ref{tab:unknown_logit}).
+
+\begin{table}[!htbp]
+  \centering
+  \scriptsize
+  \renewcommand{\arraystretch}{1.06}
+  \caption{Mean decision-axis logit; positive values favor Supported.}
+  \label{tab:unknown_logit}
+  \begin{tabular*}{\columnwidth}{@{\extracolsep{\fill}}lrrrrr@{}}
+    \toprule
+    \textbf{Encoder} & \textbf{S} & \textbf{R} &
+    \textbf{U} & \textbf{NA} & \textbf{Unc} \\
+    \midrule
+    TF--IDF      & 9.20 & $-8.74$ & $-1.05$ & .37 & $-1.04$ \\
+    ClinicalBERT & 7.55 & $-6.50$ & $-1.02$ & .65 & $-.25$ \\
+    Qwen3-Emb    & 11.31 & $-9.72$ & $-7.85$ & $-9.27$ & $-2.65$ \\
+    Jina v5      & 5.53 & $-7.83$ & $-8.61$ & $-1.29$ & 5.04 \\
+    BioLORD      & 8.99 & $-10.34$ & $-16.50$ & $-3.35$ & $-2.85$ \\
+    MedCPT       & 3.60 & $-6.99$ & $-11.68$ & 3.07 & $-.32$ \\
+    med-gte      & 7.59 & $-8.00$ & 4.64 & $-.16$ & $-.16$ \\
+    \bottomrule
+  \end{tabular*}
+\end{table}
+
+\FloatBarrier
+
+\section{Split Stability}
+\label{app:split_stability}
+
+The primary results are not driven by one favorable partition. Across ten
+background splits, Qwen3-Embedding, Jina v5, BioLORD, MedCPT, and TF--IDF exceed an
+Unmentioned-to-Refuted rate of 0.5 in every split, whereas med-gte remains below
+0.5 throughout and ClinicalBERT exceeds 0.5 in eight of ten splits. Four held-out-concept folds reproduce the same encoder-level
+ordering. Known-state accuracy remains high, so the directional differences
+cannot be attributed to unstable recognition of explicit evidence
+(Table~\ref{tab:split_stability}).
+
+\begin{table}[!htbp]
+  \centering
+  \scriptsize
+  \renewcommand{\arraystretch}{1.06}
+  \caption{Split stability. Values are mean $\pm$ SD; parentheses give
+  splits with U$\to$R $>.5$.}
+  \label{tab:split_stability}
+  \begin{tabular*}{\columnwidth}{@{\extracolsep{\fill}}lcccc@{}}
+    \toprule
+    & \multicolumn{2}{c}{\textbf{Background}} &
+    \multicolumn{2}{c}{\textbf{Concept}} \\
+    \cmidrule(lr){2-3}\cmidrule(lr){4-5}
+    \textbf{Encoder} & \textbf{Known} & \textbf{U$\to$R} &
+    \textbf{Known} & \textbf{U$\to$R} \\
+    \midrule
+    TF--IDF & 1.00$\pm$.00 & .71$\pm$.04 (10) &
+              1.00$\pm$.00 & .88$\pm$.11 (4) \\
+    Qwen    & .93$\pm$.04 & .90$\pm$.06 (10) &
+              .95$\pm$.04 & .98$\pm$.01 (4) \\
+    Jina    & .93$\pm$.02 & .85$\pm$.04 (10) &
+              .85$\pm$.06 & .88$\pm$.02 (4) \\
+    BioLORD & .95$\pm$.02 & .97$\pm$.03 (10) &
+              .89$\pm$.06 & .99$\pm$.01 (4) \\
+    med-gte & .93$\pm$.04 & .34$\pm$.08 (0) &
+              .84$\pm$.19 & .24$\pm$.16 (0) \\
+    MedCPT  & .85$\pm$.03 & .75$\pm$.05 (10) &
+              .71$\pm$.08 & .79$\pm$.08 (4) \\
+    ClinicalBERT & .93$\pm$.04 & .58$\pm$.11 (8) &
+              .99$\pm$.01 & .67$\pm$.18 (4) \\
+    \bottomrule
+  \end{tabular*}
+\end{table}
+
+\FloatBarrier
+
+\section{MIMIC Negative Controls}
+\label{app:mimic_controls}
+Table~\ref{tab:mimic_controls} shows that low UPFNR can be achieved by a
+degenerate positive bias; the four-cell recalls expose this failure.
+
+\begin{table}[!htbp]
+  \centering
+  \scriptsize
+  \renewcommand{\arraystretch}{1.05}
+  \caption{MIMIC negative controls using Qwen3-Embedding.}
+  \label{tab:mimic_controls}
+  \begin{tabular*}{\columnwidth}{@{\extracolsep{\fill}}lrrrr@{}}
+    \toprule
+    \multicolumn{5}{l}{\emph{Overall metrics}} \\
+    \textbf{Model} & \textbf{Macro} & \textbf{UPFNR} &
+    \textbf{HCWE} & \textbf{Det.} \\
+    \midrule
+    Patient + prop. & .74 & .43 & .38 & .48 \\
+    Proposition only & .65 & .06 & .06 & .39 \\
+    Concept prior & .65 & .06 & .06 & .45 \\
+    \addlinespace[3pt]
+    \multicolumn{5}{l}{\emph{Cell recall}} \\
+    \textbf{Model} & \textbf{$C^+O^+$} & \textbf{$C^-O^+$} &
+    \textbf{$C^+O^-$} & \textbf{$C^-O^-$} \\
+    \midrule
+    Patient + prop. & .73 & .84 & .57 & .82 \\
+    Proposition only & .97 & .33 & .94 & .35 \\
+    Concept prior & .97 & .33 & .94 & .35 \\
+    \bottomrule
+  \end{tabular*}
+\end{table}
+
+\section{Human-Audit Subset Sensitivity}
+\label{app:audit_sensitivity}
+
+We re-evaluate the MIMIC classifier on 300 dual-annotated admission--concept
+cases (anemia and thrombocytopenia only) as an exploratory sensitivity analysis, reporting UPFNR ($=1-\text{Recall}(C^+)$) on $C^+$ audit rows under
+five operational definitions of textual $O^-$: Human1, Human2, consensus,
+union (either annotator marks \emph{unmentioned}), and intersection (both
+annotators agree on \emph{unmentioned}).
+Wilson 95\% intervals are reported for binomial proportions.
+The Qwen3-14B $O^-$ $C^+$ subset ($n=7$) coincides with the
+Qwen3-14B--annotator-agreement subset on this audit sample. Table~\ref{tab:audit_sensitivity} reports the
+resulting estimates and Wilson intervals.
+
+\begin{table}[!htbp]
+  \centering
+  \scriptsize
+  \renewcommand{\arraystretch}{1.06}
+  \caption{Audit-subset UPFNR [Wilson 95\% CI]. H1/consensus/intersection use
+  $n=18$; H2/union use $n=19$; Qwen3-14B $O^-$ uses $n=7$.}
+  \label{tab:audit_sensitivity}
+  \begin{tabular*}{\columnwidth}{@{\extracolsep{\fill}}lccc@{}}
+    \toprule
+    \textbf{Encoder} & \textbf{H1/Cons./Int.} &
+    \textbf{H2/Union} & \textbf{Qwen3-14B} \\
+    \midrule
+    TF--IDF & .44 [.25,.66] & .47 [.27,.68] & 1.00 [.65,1.00] \\
+    Qwen    & .17 [.06,.39] & .16 [.06,.38] & .29 [.08,.64] \\
+    Jina    & .28 [.12,.51] & .26 [.12,.49] & .57 [.25,.84] \\
+    BioLORD & .33 [.16,.56] & .32 [.15,.54] & .71 [.36,.92] \\
+    \bottomrule
+  \end{tabular*}
+\end{table}
+
+\section{Audit-Calibrated Label-Noise Sensitivity}
+\label{app:label_noise}
+
+Human audit estimates that 55--65\% of Qwen3-14B \emph{unmentioned}
+labels are confirmed (Appendix Table~\ref{tab:audit_ominus_precision}).
+We report two complementary analyses on the audited-concept
+$C^+O^-$ cohort ($N=75$), regenerated from the same per-concept classifier
+protocol as Table~\ref{tab:mimic} (code asserts
+$|\text{observed UPFNR} - \text{main table}| < 10^{-9}$).
+Contamination assumptions: $q=0.55$ (per-annotator conservative),
+$q=0.60$ (overall cohort-weighted $O^-$ precision, applied conservatively to
+$C^+O^-$), and $q=0.65$ (consensus audit-sample optimistic).
+Because the $C^+$ audit strata contain only seven Qwen3-14B-$O^-$ cases (all
+human-confirmed), we avoid treating their observed precision of 1.00 as a
+stable $C^+$-specific estimate and use the overall cohort-weighted value of
+0.60 as the primary conservative setting.
+
+\subsection{Missing-at-random scenario}
+In each of 1{,}000 Monte Carlo replicates, we independently retain a fraction
+$p_{\text{keep}}=q$ of Qwen-labeled $C^+O^-$ cases (concept-stratified) and
+exclude the rest as putative false $O^-$ labels.
+This assumes false labels are deleted independently of model prediction; median
+UPFNR closely tracks the observed value in Table~\ref{tab:mimic}
+(Table~\ref{tab:label_noise_mar}).
+
+\subsection{Worst-case partial-identification bounds}
+Let $N=75$ and $E$ be model-predicted-negative count on Qwen-labeled $C^+O^-$.
+Assuming at least fraction $q$ of labels are true $O^-$, the true UPFNR lies in
+\[
+  \Bigl[\max\!\Bigl(0,\frac{E-(1-q)N}{qN}\Bigr),\;
+        \min\!\Bigl(1,\frac{E}{qN}\Bigr)\Bigr],
+\]
+allowing false-$O^-$ labels to concentrate on model-error or model-correct
+cases. Tables~\ref{tab:label_noise_bounds} and \ref{tab:label_noise_mar}
+report the worst-case and missing-at-random results.
+
+\begin{table}[!htbp]
+  \centering
+  \scriptsize
+  \renewcommand{\arraystretch}{1.05}
+  \caption{Worst-case UPFNR bounds; ranges are [LB, UB].}
+  \label{tab:label_noise_bounds}
+  \begin{tabular*}{\columnwidth}{@{\extracolsep{\fill}}lcccc@{}}
+    \toprule
+    \textbf{Encoder} & \textbf{Obs.} & \textbf{$q=.55$} &
+    \textbf{$q=.60$} & \textbf{$q=.65$} \\
+    \midrule
+    Qwen3-Emb    & .440 & [.00,.80] & [.07,.73] & [.14,.68] \\
+    Jina v5      & .413 & [.00,.75] & [.02,.69] & [.10,.64] \\
+    BioLORD      & .533 & [.15,.97] & [.22,.89] & [.28,.82] \\
+    ClinicalBERT & .547 & [.18,.99] & [.24,.91] & [.30,.84] \\
+    MedCPT       & .533 & [.15,.97] & [.22,.89] & [.28,.82] \\
+    med-gte      & .493 & [.08,.90] & [.16,.82] & [.22,.76] \\
+    TF--IDF      & .653 & [.37,1] & [.42,1] & [.47,1] \\
+    \bottomrule
+  \end{tabular*}
+\end{table}
+
+\begin{table}[!htbp]
+  \centering
+  \footnotesize
+  \renewcommand{\arraystretch}{1.08}
+  \caption{MAR label-noise sensitivity at $p_{\mathrm{keep}}=.60$
+  (1,000 replicates).}
+  \label{tab:label_noise_mar}
+  \begin{tabular*}{\columnwidth}{@{\extracolsep{\fill}}lccc@{}}
+    \toprule
+    \textbf{Encoder} & \textbf{Median} & \textbf{95\% range} &
+    \textbf{HCWE} \\
+    \midrule
+    Qwen3-Emb    & .435 & [.341, .529] & .349 \\
+    Jina v5      & .415 & [.326, .512] & .360 \\
+    BioLORD      & .533 & [.435, .625] & .347 \\
+    ClinicalBERT & .546 & [.454, .644] & .468 \\
+    MedCPT       & .532 & [.442, .623] & .429 \\
+    med-gte      & .500 & [.395, .591] & .347 \\
+    TF--IDF      & .649 & [.565, .744] & .450 \\
+    \bottomrule
+  \end{tabular*}
+\end{table}
+
+\section{Stratified Human Precision for Unmentioned Labels}
+\label{app:audit_ominus_precision}
+
+Table~\ref{tab:audit_ominus_precision} decomposes $P(\text{human }O^- \mid
+\text{Qwen }O^-)$ on the 300-case audit sample and reweights stratum
+estimates by the audited-concept MIMIC test distribution of Qwen3-14B-$O^-$
+cells ($N_{\text{cohort}}=805$).
+
+\begin{table}[!htbp]
+  \centering
+  \footnotesize
+  \renewcommand{\arraystretch}{1.08}
+  \caption{Consensus precision of Qwen-\emph{unmentioned} labels by audit
+  stratum. Weights follow the audited-concept test distribution.}
+  \label{tab:audit_ominus_precision}
+  \begin{tabular*}{\columnwidth}{@{\extracolsep{\fill}}lrrr@{}}
+    \toprule
+    \textbf{Stratum} & \textbf{$n$} & \textbf{Prec.} & \textbf{Weight} \\
+    \midrule
+    Anemia $C^-$           & 4  & .50 & .29 \\
+    Anemia $C^+$           & 3  & 1.00 & .08 \\
+    Thrombocytopenia $C^-$ & 29 & .59 & .62 \\
+    Thrombocytopenia $C^+$ & 4  & 1.00 & .02 \\
+    \midrule
+    Pooled audit           & 40 & .65 & --- \\
+    Cohort weighted        & --- & .60 & --- \\
+    Per-annotator pooled   & 47 & .55 & --- \\
+    \bottomrule
+  \end{tabular*}
+  \vspace{2pt}
+  {\scriptsize Cohort-weighted 95\% bootstrap CI: [.42, .78].}
+\end{table}
+
+\FloatBarrier
+
+\section{SilentEHR Input Ablation}
+\label{app:input_ablation}
+
+Table~\ref{tab:input_ablation} isolates whether CWE arises from patient
+embeddings, proposition embeddings, or their pairing. Proposition-only features
+collapse to chance on Known cases (0.50) and zero Unmentioned UNR because the
+head cannot distinguish patients. Patient-only features preserve high UNR for
+Qwen3-Embedding, Jina v5, and BioLORD, showing that patient geometry alone
+drives much of the collapse. Shuffling proposition assignments at test time
+preserves UNR but degrades Known accuracy, confirming that correct pairing is
+required for evidence recognition yet unnecessary for silence$\to$Refuted
+mapping.
+
+\begin{table}[!htbp]
+  \centering
+  \scriptsize
+  \renewcommand{\arraystretch}{1.06}
+  \caption{Input ablation on new-background protocol (Known acc /
+  Unmentioned UNR).}
+  \label{tab:input_ablation}
+  \begin{tabular*}{\columnwidth}{@{\extracolsep{\fill}}lcccccc@{}}
+    \toprule
+    & \multicolumn{2}{c}{\textbf{Full}} &
+    \multicolumn{2}{c}{\textbf{Patient}} &
+    \multicolumn{2}{c}{\textbf{Prop / Shuf}} \\
+    \cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}
+    \textbf{Encoder} & \textbf{K} & \textbf{U} &
+    \textbf{K} & \textbf{U} & \textbf{Prop K} & \textbf{Shuf K} \\
+    \midrule
+    Qwen3-Emb & .98 & .94 & .96 & .92 & .50 & .79 \\
+    Jina v5   & .96 & .91 & .96 & 1.00 & .50 & .69 \\
+    BioLORD   & .99 & .99 & .98 & 1.00 & .50 & .64 \\
+    med-gte   & 1.00 & .38 & .97 & .08 & .50 & .79 \\
+    TF--IDF   & 1.00 & .69 & 1.00 & .92 & .50 & 1.00 \\
+    \bottomrule
+  \end{tabular*}
+\end{table}
+
+\section{Pair-Feature Composition Ablation}
+\label{app:pair_ablation}
+
+Table~\ref{tab:pair_ablation} varies the pair representation fed to the
+Supported/Refuted head. For Qwen3-Embedding and Jina v5, adding
+$|e_x-e_h|$ and $e_x\odot e_h$ \emph{increases} Unmentioned UNR relative to
+$e_x$ alone, while Known accuracy remains high. CWE is therefore not explained
+by the linear head alone: interaction features amplify collapse once patient
+context is available.
+
+\begin{table}[!htbp]
+  \centering
+  \scriptsize
+  \renewcommand{\arraystretch}{1.06}
+  \caption{Pair-feature ablation (Known / Unmentioned UNR / HCUNR@0.9 /
+  Unmentioned-detection AUROC). Full = $[e_x;e_h;|e_x-e_h|;e_x\odot e_h]$.}
+  \label{tab:pair_ablation}
+  \begin{tabular*}{\columnwidth}{@{\extracolsep{\fill}}llcccc@{}}
+    \toprule
+    \textbf{Encoder} & \textbf{Features} & \textbf{K} & \textbf{U} &
+    \textbf{HC} & \textbf{Det.} \\
+    \midrule
+    Qwen3-Emb & $e_x$ & .96 & .92 & .75 & .96 \\
+                & $[e_x;e_h]$ & .96 & .72 & .42 & .91 \\
+                & Full & .98 & .94 & .88 & .66 \\
+    Jina v5   & $e_x$ & .96 & 1.00 & .42 & .92 \\
+                & $[e_x;e_h]$ & .96 & .68 & .54 & .78 \\
+                & Full & .96 & .91 & .81 & .50 \\
+    BioLORD   & $e_x$ & .98 & 1.00 & 1.00 & .70 \\
+                & $[e_x;e_h]$ & .97 & .92 & .88 & .60 \\
+                & Full & .99 & .99 & .99 & .18 \\
+    med-gte   & $e_x$ & .97 & .08 & .08 & .94 \\
+                & $[e_x;e_h]$ & .96 & .10 & .07 & .75 \\
+                & Full & 1.00 & .38 & .16 & .75 \\
+    \bottomrule
+  \end{tabular*}
+\end{table}
+
+\section{Mechanism Probes on Clean SilentEHR}
+\label{app:mechanism_clean}
+
+Local Refuted-neighborhood composition (Local-R@10) correlates with UNR for
+high-collapse encoders: BioLORD reaches Local-R@10$=.72$ with UNR$=.99$.
+Linear Unmentioned-vs-known probes achieve AUROC$\approx$1.0 on clean
+background-only Unmentioned cases, indicating strong separability of silence
+from explicit evidence in embedding space (Table~\ref{tab:mechanism_clean}).
+
+\begin{table}[!htbp]
+  \centering
+  \scriptsize
+  \renewcommand{\arraystretch}{1.06}
+  \caption{Mechanism probes on clean new-background split.}
+  \label{tab:mechanism_clean}
+  \begin{tabular*}{\columnwidth}{@{\extracolsep{\fill}}lrrr@{}}
+    \toprule
+    \textbf{Encoder} & \textbf{UNR} & \textbf{Local-R@10} &
+    \textbf{U/K AUROC} \\
+    \midrule
+    Qwen3-Emb    & .94 & .65 & 1.00 \\
+    Jina v5      & .91 & .57 & .98 \\
+    BioLORD      & .99 & .72 & .99 \\
+    med-gte      & .38 & .52 & 1.00 \\
+    TF--IDF      & .69 & .51 & 1.00 \\
+    ClinicalBERT & .60 & .52 & 1.00 \\
+    MedCPT       & .79 & .53 & 1.00 \\
+    \bottomrule
+  \end{tabular*}
+\end{table}
+
+\section{Mechanism Probe Robustness Across Tiers}
+\label{app:mechanism_robust}
+
+Table~\ref{tab:mechanism_robust} repeats U/K AUROC and Local-R@10 on
+held-concept, indirect-evidence, and length-matched tiers. Separability
+remains high ($\geq$.97 AUROC) under indirect and length-matched controls;
+Local-R@10 stays above chance ($>.50$) for dense encoders in all tiers.
+
+\begin{table}[!htbp]
+  \centering
+  \scriptsize
+  \renewcommand{\arraystretch}{1.06}
+  \caption{Mechanism probe robustness (Qwen3-Embedding shown; others similar).}
+  \label{tab:mechanism_robust}
+  \begin{tabular*}{\columnwidth}{@{\extracolsep{\fill}}lccc@{}}
+    \toprule
+    \textbf{Tier} & \textbf{Qwen U/K} & \textbf{Qwen LR@10} &
+    \textbf{BioLORD LR@10} \\
+    \midrule
+    Held concept      & 1.00 & .58 & .64 \\
+    Indirect evidence & 1.00 & .68 & .62 \\
+    Length matched    & 1.00 & .62 & .72 \\
+    \bottomrule
+  \end{tabular*}
+\end{table}
+
+\section{HCUNR Threshold Sensitivity}
+\label{app:hcunr_sensitivity}
+
+Table~\ref{tab:hcunr_sensitivity} reports high-confidence UNR at
+$\tau\in\{0.8,0.9,0.95\}$. Rankings are stable: BioLORD and Qwen3-Embedding
+remain above 0.83 at $\tau=0.95$; med-gte stays below 0.10.
+
+\begin{table}[!htbp]
+  \centering
+  \scriptsize
+  \renewcommand{\arraystretch}{1.06}
+  \caption{Unmentioned HCUNR at alternative confidence thresholds.}
+  \label{tab:hcunr_sensitivity}
+  \begin{tabular*}{\columnwidth}{@{\extracolsep{\fill}}lcccc@{}}
+    \toprule
+    \textbf{Encoder} & \textbf{UNR} & \textbf{@.8} & \textbf{@.9} &
+    \textbf{@.95} \\
+    \midrule
+    Qwen3-Emb    & .94 & .92 & .88 & .83 \\
+    Jina v5      & .91 & .83 & .81 & .76 \\
+    BioLORD      & .99 & .99 & .99 & .99 \\
+    med-gte      & .38 & .22 & .16 & .10 \\
+    TF--IDF      & .69 & .62 & .46 & .00 \\
+    ClinicalBERT & .60 & .38 & .27 & .19 \\
+    MedCPT       & .79 & .74 & .72 & .72 \\
+    \bottomrule
+  \end{tabular*}
+\end{table}
+
+\section{MIMIC Cell Recalls and Temporal Observability}
+\label{app:mimic_cells}
+
+Table~\ref{tab:mimic_cell_recalls} reports per-cell recall
+$R=P(\hat C=C\mid C,O)$ on the matched MIMIC cohort. All encoders achieve
+$R^{-, -}>0.76$ on $C^-O^-$ cases, showing that negative structured states
+are recognized when documentation is absent; UPFNR on $C^+O^-$ therefore reflects
+asymmetric extrapolation rather than blanket negative bias.
+
+\begin{table}[!htbp]
+  \centering
+  \scriptsize
+  \renewcommand{\arraystretch}{1.06}
+  \caption{MIMIC cell recalls ($n=1122$ for $C^-O^-$; $n=80$ for $C^+O^-$).}
+  \label{tab:mimic_cell_recalls}
+  \begin{tabular*}{\columnwidth}{@{\extracolsep{\fill}}lrrr@{}}
+    \toprule
+    \textbf{Encoder} & \textbf{$R^{+,+}$} & \textbf{$R^{+,-}$} &
+    \textbf{$R^{-,-}$} \\
+    \midrule
+    Qwen3-Emb    & .73 & .58 & .82 \\
+    Jina v5      & .71 & .51 & .83 \\
+    BioLORD      & .66 & .46 & .76 \\
+    ClinicalBERT & .65 & .40 & .81 \\
+    MedCPT       & .69 & .53 & .82 \\
+    med-gte      & .67 & .54 & .82 \\
+    TF--IDF      & .82 & .19 & .85 \\
+    \bottomrule
+  \end{tabular*}
+\end{table}
+
+Discharge-note \emph{charttime} and \emph{storetime} are not exported in our
+MIMIC struct cohort; we therefore use \emph{dischtime} as a conservative proxy
+for note availability. Labs are drawn from the final 24\,h before discharge, so
+$t_{\mathrm{lab}}\le t_{\mathrm{discharge}}$ holds for 100\% (80/80) of
+$C^+O^-$ test cases. Under this conservative subset,
+$R^{+,-}=0.58$ (Qwen3-Embedding), unchanged from the full $C^+O^-$ subset.
+
+\section{Real Clinical Supported/Refuted/Unknown Validation}
+\label{app:real_sru}
+
+We construct a human-gold S/R/U bridge from the 300-case MIMIC audit cohort
+with dual annotators (Human1 + Human2). Seven-class observation labels map to
+S/R/U as follows: \emph{observed\_positive}$\to$Supported,
+\emph{observed\_negative}$\to$Refuted, and
+\emph{unmentioned}/\emph{uncertain}/\emph{historical\_only}/\emph{admission\_only}/\emph{temporal\_conflict}$\to$Unknown.
+Dual-annotator consensus holds on 255/300 original audit pairs
+($\kappa\approx$.80); 45 disagreements are excluded (no third adjudicator).
+A 50-pair non-laboratory expansion (strict \emph{unmentioned} propositions on
+the same notes) adds 50/50 consensus rows, yielding 305 consensus pairs total.
+Table~\ref{tab:data_flow} summarizes how this cohort relates to the 493-pair
+silver set and the Qwen3-14B labeling pool.
+
+Our primary estimate uses grouped subject-level 5-fold cross-validation: train
+Supported+Refuted only on four folds and report pooled out-of-fold metrics on
+all 305 consensus rows ($n_{\mathrm{Unknown}}=159$; 83 strict-\emph{unmentioned},
+62 \emph{admission-only}; Wilson 95\% intervals in
+Table~\ref{tab:real_sru_cv}). A single 70/30 subject split on the original
+255 lab-audit consensus rows ($n_{\mathrm{test}}=77$, 34 Unknown; seed~0) is
+retained as a sensitivity check (Table~\ref{tab:real_sru_split}) because split
+parity was verified on that subset
+(\texttt{outputs/real\_clinical\_sru\_split\_parity.json}); all models pass
+direction sanity ($\bar{p}_{\mathrm{ref}}|R > \bar{p}_{\mathrm{ref}}|S$ on
+known training rows) with explicit \texttt{clf.classes\_} indexing.
+
+On pooled OOF consensus gold, frozen verifiers do \emph{not} systematically
+collapse silence to Refuted: Qwen3-Emb UNR$=.37$ [.30,.45], Jina v5
+UNR$=.36$ [.29,.44], BioLORD UNR$=.35$ [.28,.43]---far below SilentEHR
+Unmentioned UNR ($\geq$.91 for the same encoders). Strict-\emph{unmentioned}
+Unknown rows show higher UNR (.47--.52) than \emph{admission-only} rows
+(.13--.26), consistent with controlled absence being the strongest CWE setting.
+This supports treating CWE as strongest under controlled omission while real
+discharge-note silence is often mapped to Unknown rather than Refuted under
+human-consensus S/R/U labels. The 493-pair silver set
+(\texttt{real\_clinical\_sru\_silver.jsonl}) adds Qwen3-14B-mapped pairs on the
+same notes for sensitivity only (Appendix~\ref{app:data_flow}).
+
+\begin{table}[!htbp]
+  \centering
+  \scriptsize
+  \renewcommand{\arraystretch}{1.06}
+  \caption{Real clinical S/R/U (human consensus; grouped 5-fold CV; train S/R
+  only). Pooled out-of-fold Wilson 95\% intervals.}
+  \label{tab:real_sru_cv}
+  \begin{tabular*}{\columnwidth}{@{\extracolsep{\fill}}lrrrrr@{}}
+    \toprule
+    \textbf{Encoder} & \textbf{Known} & \textbf{UNR} &
+    \textbf{HC@.9} & \textbf{Adm.} & \textbf{Strict unm.} \\
+    \midrule
+    Qwen3-Emb    & .67 [.59,.74] & .37 [.30,.45] &
+    .34 [.24,.44] & .26 [.17,.38] & .47 [.37,.58] \\
+    Jina v5      & .70 [.62,.77] & .36 [.29,.44] &
+    .36 [.27,.47] & .23 [.14,.34] & .49 [.39,.60] \\
+    BioLORD      & .67 [.59,.74] & .35 [.28,.43] &
+    .33 [.23,.43] & .15 [.08,.25] & .52 [.41,.62] \\
+    TF--IDF      & .63 [.55,.70] & .33 [.26,.40] &
+    .29 [.20,.40] & .13 [.07,.23] & .47 [.37,.58] \\
+    \bottomrule
+  \end{tabular*}
+\end{table}
+
+\begin{table}[!htbp]
+  \centering
+  \scriptsize
+  \renewcommand{\arraystretch}{1.06}
+  \caption{Single 70/30 subject split sensitivity on 255 lab-audit consensus
+  rows (train S/R only; seed~0).}
+  \label{tab:real_sru_split}
+  \begin{tabular*}{\columnwidth}{@{\extracolsep{\fill}}lrrrr@{}}
+    \toprule
+    \textbf{Encoder} & \textbf{$n_{\mathrm{test}}$} &
+    \textbf{Known} & \textbf{Unknown UNR} & \textbf{HC@.9} \\
+    \midrule
+    Qwen3-Emb    & 77 & .65 & .21 & .00 \\
+    Jina v5      & 77 & .65 & .15 & .00 \\
+    BioLORD      & 77 & .74 & .18 & .13 \\
+    TF--IDF      & 77 & .70 & .18 & .13 \\
+    \bottomrule
+  \end{tabular*}
+\end{table}
+
+\section{Label-Withholding on Natural Clinical Corpora}
+\label{app:label_withholding}
+
+This bridge is \emph{not} counterfactual evidence deletion from natural notes.
+We use Qwen3-14B-labeled MIMIC struct rows: training includes only clean
+observed-positive/negative pairs (present vs.\ absent documentation in the
+full note), while the held-out test split retains naturally
+\emph{unmentioned} concept--note cells ($n_{\mathrm{unmentioned}}=1202$).
+No evidence spans are removed at inference time; Unknown cases are those
+Qwen3-14B marked \emph{unmentioned} in the discharge summary.
+Because observation-label precision on $O^-$ is $\approx$.60
+(Table~\ref{tab:audit}), treat this as a noisy-label sensitivity bridge
+between controlled omission and real-note human gold rather than a gold
+naturally occurring Unknown benchmark. Table~\ref{tab:label_withholding}
+reports results on the matched MIMIC cohort. UNR remains high ($\geq$.75 for
+Qwen3-Emb, Jina v5, BioLORD), confirming collapse on natural note silence
+under binary training even without synthetic backgrounds. MedNLI evaluation
+uses the same protocol when PhysioNet files are placed under
+\texttt{data/mednli/}; we omit it here pending credential access.
+
+\begin{table}[!htbp]
+  \centering
+  \scriptsize
+  \renewcommand{\arraystretch}{1.06}
+  \caption{MIMIC label-withholding bridge (train observed; test unmentioned).}
+  \label{tab:label_withholding}
+  \begin{tabular*}{\columnwidth}{@{\extracolsep{\fill}}lrrrr@{}}
+    \toprule
+    \textbf{Encoder} & \textbf{Known} & \textbf{UNR} &
+    \textbf{HC@.9} & \textbf{Det.} \\
+    \midrule
+    Qwen3-Emb    & .81 & .80 & .72 & .48 \\
+    Jina v5      & .79 & .81 & .73 & .46 \\
+    BioLORD      & .72 & .75 & .67 & .45 \\
+    TF--IDF      & .86 & .84 & .76 & .49 \\
+    \bottomrule
+  \end{tabular*}
+\end{table}
+
+\section{Simple Artifact Baselines}
+\label{app:artifact_baselines}
+
+Table~\ref{tab:artifact_baselines} compares simple artifact detectors against
+dense encoders on the SilentEHR new-background protocol. Length, concept-string
+match, and bag-of-words coverage either collapse to chance Known accuracy
+(.50) or fail to reproduce high-confidence CWE. A lexical deny/affirm cue
+classifier achieves high UNR (.87) but with low Unmentioned-detection AUROC
+(.29), indicating a different failure mode than representation-driven collapse.
+A random-embedding control matches chance UNR ($\approx$.50) with HCUNR@0.9
+$=.37$, whereas Qwen3-Emb, Jina v5, and BioLORD retain HCUNR@0.9$\geq$.81
+with Known$\geq$.96---supporting a representation-level rather than purely
+lexical explanation of CWE on clean synthetic silence.
+
+\begin{table}[!htbp]
+  \centering
+  \scriptsize
+  \renewcommand{\arraystretch}{1.06}
+  \caption{Artifact baselines vs.\ encoders (SilentEHR new-background).}
+  \label{tab:artifact_baselines}
+  \begin{tabular*}{\columnwidth}{@{\extracolsep{\fill}}lrrrr@{}}
+    \toprule
+    \textbf{Method} & \textbf{Known} & \textbf{UNR} &
+    \textbf{HC@.9} & \textbf{Det.} \\
+    \midrule
+    Length           & .50 & .61 & .00 & .41 \\
+    Concept match    & .50 & .00 & .00 & .50 \\
+    Lexical cue      & .84 & .87 & .00 & .29 \\
+    BoW coverage     & .50 & .00 & .00 & .50 \\
+    Random encoder   & .48 & .50 & .37 & .47 \\
+    \midrule
+    Qwen3-Emb        & .98 & .81 & .86 & .67 \\
+    Jina v5          & .96 & .60 & .81 & .50 \\
+    BioLORD          & .99 & .80 & .99 & .18 \\
+    \bottomrule
+  \end{tabular*}
+\end{table}
+
+\section{Matched-Family Verbatim Example}
+\label{app:matched_family}
+
+Background~0 is shared across all nine realizations below
+(\texttt{background\_id=0}, \texttt{concept\_id=penicillin\_allergy}).
+Only the final sentence (or its absence) changes; the proposition remains
+``The patient has a penicillin allergy.'' Unmentioned deletes the concept
+sentence entirely rather than inserting a neutral filler (length matching is a
+separate tier). Refuted states assert explicit absence; Not-assessed and
+Uncertain retain a penicillin mention but do not assert present allergy.
+
+\paragraph{Shared background (all states).}
+\emph{The patient is a 67-year-old woman admitted with fatigue and poor oral
+intake. Her medical history includes hypertension and hyperlipidemia. She was
+hemodynamically stable on admission. Physical examination was otherwise
+unremarkable. Labs showed mild hyponatremia. She lives with her daughter and is
+independent in most ADLs. Home medications include amlodipine and atorvastatin.
+Nursing notes describe improved appetite after IV fluids. Plan includes further
+workup for failure to thrive.}
+
+\paragraph{State-specific endings (verbatim from \texttt{controlled\_full.jsonl}).}
+\begin{itemize}
+  \item \textbf{Supported} (\texttt{p01440}): \emph{A penicillin allergy is documented.}
+  \item \textbf{Supported, held template} (\texttt{p01441}): \emph{The record confirms penicillin allergy.}
+  \item \textbf{Refuted} (\texttt{p01442}): \emph{The record states no known penicillin allergy.}
+  \item \textbf{Refuted, held template} (\texttt{p01443}): \emph{Penicillin allergy is explicitly absent.}
+  \item \textbf{Unmentioned} (\texttt{p01444}): \emph{(no additional sentence)}
+  \item \textbf{Not assessed} (\texttt{p01445}): \emph{Penicillin allergy status was not documented.}
+  \item \textbf{Not assessed, held} (\texttt{p01446}): \emph{Penicillin allergy reconciliation was deferred.}
+  \item \textbf{Uncertain} (\texttt{p01447}): \emph{The reported penicillin allergy could not be confirmed.}
+  \item \textbf{Uncertain, held} (\texttt{p01448}): \emph{The possible penicillin allergy requires clarification.}
+\end{itemize}
+
+\section{Human Annotation Protocol}
+\label{app:annotation_protocol}
+
+\paragraph{Sampling.}
+We draw 300 admission--concept pairs from the Qwen3-14B-labeled MIMIC struct
+bridge: 150 anemia + 150 thrombocytopenia. Stratification is by
+(\emph{concept}, \emph{automatic mention status}, \emph{structured\_positive}),
+with $n=25$ per cell. Mention status uses the struct-bridge coarse classes
+\emph{observed\_pos}, \emph{observed\_neg}, and \emph{unmentioned} (six cells
+per concept). This balances structured positive/negative laboratory state and
+automatic mention class; we do \emph{not} perform additional Qwen-status
+oversampling beyond this fixed grid, so Unknown is represented at the designed
+cell rate rather than deliberately enriched.
+
+\paragraph{Blind protocol.}
+Annotators receive \texttt{mimic\_audit\_300.csv} with the full discharge note
+(\texttt{encoder\_visible\_text}), concept name, proposition, structured
+laboratory value (\texttt{struct\_value}), and chart/discharge timestamps.
+They do \emph{not} see the automatic mention status, Qwen3-14B label,
+four-cell \texttt{automatic\_cell}, or any model prediction. A separate key
+file (\texttt{mimic\_audit\_300\_key.csv}) holds automatic labels for scoring
+only. Annotators quote a short evidence span for every label other than
+\emph{unmentioned}.
+
+\paragraph{Seven-class definitions.}
+\begin{itemize}
+  \item \textbf{observed\_positive}: near-discharge text supports the abnormal
+  laboratory state for the proposition.
+  \item \textbf{observed\_negative}: near-discharge text supports normal/absent
+  state.
+  \item \textbf{unmentioned}: no usable textual evidence for the proposition.
+  \item \textbf{admission-only}: evidence is explicitly limited to
+  admission/early stay, not near discharge.
+  \item \textbf{historical-only}: evidence is historical or resolved without a
+  usable near-discharge state.
+  \item \textbf{uncertain}: current evidence is explicitly uncertain or
+  incomplete.
+  \item \textbf{temporal-conflict}: incompatible near-discharge evidence cannot
+  be reconciled.
+\end{itemize}
+Definitions match the Qwen3-14B observation prompt
+(Appendix~\ref{app:observation_labeling}).
+
+\paragraph{Consensus.}
+Gold labels require exact agreement between both annotators on the seven-class
+status. The original audit yields 255/300 consensus pairs; 45 disagreements are
+\emph{excluded} from human gold (no third adjudicator). A later 50-pair
+non-laboratory expansion on the same admissions reached 50/50 consensus and
+was merged into \texttt{real\_clinical\_sru.jsonl} ($n=305$ consensus total).
+
+\section{Real-Note Data Flow}
+\label{app:data_flow}
+
+Table~\ref{tab:data_flow} links the headline counts. The 493-pair silver set
+is \emph{not} a superset of human gold: 200 struct pairs are sampled from
+non-audit admissions (anemia/thrombocytopenia only), and 293 pairs expand audit
+admissions with additional Qwen3-14B-labeled concepts on the same notes
+(254/293 share an \texttt{audit\_id} with human rows). Consensus filtering
+for S/R-only training removes Unknown labels from the \emph{training fold} only;
+evaluation retains all Unknown rows, so label distribution at test time matches
+the consensus set (159 Unknown / 146 known S+R in 5-fold CV).
+
+\begin{table}[!htbp]
+  \centering
+  \scriptsize
+  \renewcommand{\arraystretch}{1.08}
+  \caption{Real-note evaluation data flow.}
+  \label{tab:data_flow}
+  \begin{tabular*}{\columnwidth}{@{\extracolsep{\fill}}llp{0.42\columnwidth}@{}}
+    \toprule
+    \textbf{Stage} & \textbf{$N$} & \textbf{Purpose} \\
+    \midrule
+    Qwen3-14B labeling pool & 13{,}799 notes & Observation statuses for MIMIC struct bridge \\
+    MIMIC struct bridge & 38{,}043 pairs & All lab$\times$note cells with $C$ and $O$ \\
+    Silver S/R/U subset & 493 pairs & Large-scale sensitivity (200 struct + 293 audit-note expansion) \\
+    Human audit sample & 300 pairs & Dual blind annotation (150 anemia + 150 thrombocytopenia) \\
+    Dual-annotator consensus & 305 pairs & 255 audit + 50 expansion; exact agreement only \\
+    5-fold CV (primary) & 305 pairs & Pooled OOF: 146 S/R train labels, 159 Unknown evaluated \\
+    70/30 sensitivity & 77 test pairs & Lab-audit consensus only (43 S/R + 34 Unknown); seed~0 \\
+    \bottomrule
+  \end{tabular*}
+\end{table}
+
+\section{Statistical Inference}
+\label{app:statistics}
+
+\paragraph{SilentEHR (family bootstrap).}
+Matched variants share a background--concept family; we resample families with
+replacement (2{,}000 replicates) and recompute UNR, known accuracy, and
+HCUNR@0.9. Example new-background Unmentioned UNR 95\% intervals: Qwen3-Emb
+[.90,.98], Jina v5 [.85,.93], BioLORD [.98,1.00]. Mitigation curves
+(Table~\ref{tab:split_stability}; Appendix~\ref{app:split_stability}) report mean $\pm$ SD
+over ten background redraws for UNR at 10/50/100 Unknown semantic groups.
+
+\paragraph{Real-note gold (Wilson).}
+Human-consensus S/R/U evaluation reports Wilson score 95\% intervals on pooled
+out-of-fold binomial rates (Table~\ref{tab:real_sru_cv}). Audit-subset UPFNR
+uses the same Wilson intervals (Table~\ref{tab:audit_sensitivity}).
+
+\paragraph{Directional 0.5 reference.}
+UNR$=0.5$ indicates equal Refuted vs.\ Supported pressure on Unknown profiles,
+not chance performance on a three-way task. When multiple encoders exceed 0.5
+with family-bootstrap lower bounds above 0.5, we interpret systematic Refuted
+extrapolation rather than symmetric uncertainty.
+
+\section{Observation-Label Inference Configuration}
+\label{app:observation_labeling}
+
+MIMIC observation labels were generated with \textbf{Qwen/Qwen3-14B-Instruct}
+(instruct variant; thinking mode disabled) using local \textbf{vLLM 0.6.6}
+inference. Decoding: \texttt{temperature=0}, \texttt{top\_p=1.0},
+\texttt{max\_tokens=768}, \texttt{dtype=bfloat16}. One request per unique
+admission (\texttt{hadm\_id}) batches all concepts for that note; discharge
+text is passed without truncation (longest notes $\approx$48k characters).
+Up to five retries with exponential backoff (cap 16\,s) on parse or transport
+failures; persistent failures were dropped (zero failures in the archived run
+of 13{,}799 notes).
+
+\paragraph{Prompt (full text).}
+\begin{quote}\small\ttfamily
+You label observation status in de-identified clinical discharge-note text.
+Use only the supplied TEXT; do not infer from outside knowledge or assume
+that silence is negative.
+
+The proposition concerns the patient's state near discharge. For each requested
+concept, return exactly one label:
+observed\_positive, observed\_negative, uncertain, historical\_only,
+admission\_only, temporal\_conflict, or unmentioned.
+
+Numeric thresholds: anemia = hemoglobin/Hgb $<$ 10; thrombocytopenia =
+platelets/Plt $<$ 100; hyperkalemia = potassium/K $>$ 5.5. Return JSON only:
+\{"labels":[\{"concept":"anemia","observation\_status":"unmentioned",
+"temporal\_scope":"none","evidence\_span":"","implicit\_evidence":false\}]\}.
+Evidence span must be an exact quote from TEXT, or empty when no evidence.
+\end{quote}
+The complete prompt with field definitions is in
+\texttt{silentehr.py::OBSERVATION\_PROMPT} and
+\texttt{configs/observation\_labeling.yaml}.
+
+\paragraph{Parser.}
+Responses must be a JSON object with a \texttt{labels[]} array. Each entry
+requires \texttt{concept}, \texttt{observation\_status}, \texttt{temporal\_scope},
+\texttt{evidence\_span}, and \texttt{implicit\_evidence}. Allowed statuses match
+the seven-class schema in Appendix~\ref{app:annotation_protocol}.
+\texttt{evidence\_span} must be an exact or whitespace-normalized substring of
+the note; invalid spans are cleared and marked unverified. GPU model and count
+were not retained in experiment logs; checkpoint name, prompt, decoding, and
+parsing protocol above are sufficient to reproduce labeling behavior.
+Restricted artifacts (raw label JSON with spans and note text) must not be
+placed in a public repository.
+
+\end{document}
