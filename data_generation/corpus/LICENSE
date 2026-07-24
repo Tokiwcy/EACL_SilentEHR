@@ -1,0 +1,36 @@
+Creative Commons Attribution 4.0 International (CC BY 4.0)
+
+Copyright (c) 2026 SilentEHR authors
+
+This license applies to the synthetic SilentEHR benchmark files in this
+directory (for example controlled_full.jsonl, controlled_lengthmatched.jsonl,
+controlled_randpos.jsonl, controlled_indirect.jsonl, pilot.jsonl, and
+background_contamination.json).
+
+You are free to:
+
+  Share — copy and redistribute the material in any medium or format
+  Adapt — remix, transform, and build upon the material for any purpose,
+          even commercially
+
+Under the following terms:
+
+  Attribution — You must give appropriate credit, provide a link to the
+  license, and indicate if changes were made. You may do so in any reasonable
+  manner, but not in any way that suggests the licensor endorses you or your
+  use.
+
+  No additional restrictions — You may not apply legal terms or technological
+  measures that legally restrict others from doing anything the license permits.
+
+Full legal text: https://creativecommons.org/licenses/by/4.0/legalcode
+
+Suggested attribution:
+
+  SilentEHR controlled benchmark corpus (2026). Synthetic clinical
+  counterfactual pairs for auditing closed-world extrapolation in patient
+  representations. https://github.com/Tokiwcy/EACL_SilentEHR
+  Licensed under CC BY 4.0.
+
+These files are synthetic and do not contain real patient information. They
+must not be confused with MIMIC-IV or other credentialed clinical data.

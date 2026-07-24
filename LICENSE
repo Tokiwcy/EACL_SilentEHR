@@ -1,6 +1,11 @@
-MIT License
+MIT License (software)
 
 Copyright (c) 2026 SilentEHR authors
+
+This license applies to source code, configs, prompts, and documentation in
+this repository. The synthetic benchmark JSONL files under
+data_generation/corpus/ are licensed separately under CC BY 4.0
+(data_generation/corpus/LICENSE).
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

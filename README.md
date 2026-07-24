@@ -62,4 +62,11 @@ This builds `data/mimic_struct.jsonl`, labels with Qwen3-12B, and runs the C×O 
 
 ## License
 
-Code and synthetic corpus: MIT (`LICENSE`). MIMIC-derived artifacts remain under PhysioNet data-use agreements.
+| Component | License | Location |
+|-----------|---------|----------|
+| Code, configs, prompts, docs | **MIT** | [`LICENSE`](LICENSE) |
+| Synthetic benchmark JSONL | **CC BY 4.0** | [`data_generation/corpus/LICENSE`](data_generation/corpus/LICENSE) |
+| MIMIC-derived artifacts | PhysioNet DUA | Local `data/` only (not redistributed) |
+
+When reusing the corpus, please cite the SilentEHR paper and credit the dataset
+as indicated in the corpus license file.
