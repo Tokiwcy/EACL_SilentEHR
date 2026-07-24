@@ -1,24 +1,16 @@
-#!/usr/bin/env python3
-"""Simple artifact baselines on SilentEHR binary-trap protocol."""
+"""Artifact baseline detectors for SilentEHR (self-contained)."""
+from __future__ import annotations
+
+import hashlib
 import json
 import re
-import sys
 from pathlib import Path
 
 import numpy as np
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(ROOT / "scripts"))
-
-from silentehr import (  # noqa: E402
-    FULL_DATA,
-    _train_lr,
-    load_rows,
-    pair_features,
-    protocol_split,
-)
-from silentehr_trap_utils import run_binary_trap  # noqa: E402
+from silentehr import FULL_DATA, OUT, Embedder, _train_lr, load_rows, protocol_split
+from supplementary.evaluation.trap_runner import run_binary_trap
+from supplementary.paths import OUTPUT_DIR
 
 
 NEG_CUES = (
@@ -38,49 +30,31 @@ def concept_in_text(row):
     return name in text or cid in text
 
 
-def neg_cue(text):
-    t = text.lower()
-    return any(x in t for x in NEG_CUES)
-
-
-def pos_cue(text):
-    t = text.lower()
-    return any(x in t for x in POS_CUES)
-
-
-def bow_coverage(row):
-    text = row["profile"].lower()
-    tokens = set(re.findall(r"[a-z]+", text))
-    concept_tokens = set(re.findall(r"[a-z]+", row["concept_id"].replace("_", " ")))
-    concept_tokens.add(row["concept"].lower())
-    if not concept_tokens:
-        return 0.0
-    return len(tokens & concept_tokens) / len(concept_tokens)
-
-
-def length_features(row):
-    nw = len(row["profile"].split())
-    pw = len(row["proposition"].split())
-    return np.array([nw, pw, nw * pw, np.log1p(nw), np.log1p(pw)], dtype=float)
-
-
 def artifact_features(row, mode):
     if mode == "length":
-        return length_features(row)
+        nw = len(row["profile"].split())
+        pw = len(row["proposition"].split())
+        return np.array([nw, pw, nw * pw, np.log1p(nw), np.log1p(pw)], dtype=float)
     if mode == "concept_match":
         return np.array([float(concept_in_text(row))], dtype=float)
     if mode == "lexical_cue":
+        t = row["profile"].lower()
         return np.array([
-            float(neg_cue(row["profile"])),
-            float(pos_cue(row["profile"])),
+            float(any(x in t for x in NEG_CUES)),
+            float(any(x in t for x in POS_CUES)),
             float(concept_in_text(row)),
         ], dtype=float)
     if mode == "bow_coverage":
-        return np.array([bow_coverage(row)], dtype=float)
+        text = row["profile"].lower()
+        tokens = set(re.findall(r"[a-z]+", text))
+        concept_tokens = set(re.findall(r"[a-z]+", row["concept_id"].replace("_", " ")))
+        concept_tokens.add(row["concept"].lower())
+        cov = len(tokens & concept_tokens) / len(concept_tokens) if concept_tokens else 0.0
+        return np.array([cov], dtype=float)
     raise ValueError(mode)
 
 
-def run_artifact_trap(rows, mode, protocol="new_background", tau=0.9, seed=0):
+def run_artifact_trap(rows, mode, protocol="new_background", tau=0.9):
     from sklearn.metrics import roc_auc_score
 
     train_all, test = protocol_split(rows, protocol)
@@ -90,12 +64,10 @@ def run_artifact_trap(rows, mode, protocol="new_background", tau=0.9, seed=0):
     clf, sc = _train_lr(Xtr, ytr)
 
     Xte = np.asarray([artifact_features(r, mode) for r in test])
-    Xtes = sc.transform(Xte)
-    proba = clf.predict_proba(Xtes)
+    proba = clf.predict_proba(sc.transform(Xte))
     classes = list(clf.classes_)
     i_ref, i_sup = classes.index(0), classes.index(1)
-    p_ref = proba[:, i_ref]
-    p_sup = proba[:, i_sup]
+    p_ref, p_sup = proba[:, i_ref], proba[:, i_sup]
     pred = np.where(p_sup >= p_ref, "Supported", "Refuted")
 
     known_mask = np.array([r["y3"] in ("Supported", "Refuted") for r in test])
@@ -132,6 +104,36 @@ def run_artifact_trap(rows, mode, protocol="new_background", tau=0.9, seed=0):
     }
 
 
+def load_embeddings(model, rows, device=None):
+    emb = Embedder(model, device=device)
+    texts = [r["profile"] for r in rows]
+    if model == "tfidf":
+        train_rows, _ = protocol_split(rows, "new_background")
+        fit_texts = [r["profile"] for r in train_rows]
+        fit_texts += sorted({r["proposition"] for r in rows})
+        emb.fit(fit_texts)
+        Z = emb.encode(texts)
+    else:
+        cache_dir = OUT / "embedding_cache"
+        fingerprint = hashlib.blake2b(
+            (model + "\0" + "\0".join(texts)).encode("utf-8"), digest_size=12,
+        ).hexdigest()
+        cache_path = cache_dir / f"{model.replace('/', '_')}_{fingerprint}.npy"
+        if cache_path.exists():
+            Z = np.load(cache_path)
+        else:
+            print(f"  encoding {len(texts)} profiles ...", flush=True)
+            Z = emb.encode(texts)
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            np.save(cache_path, Z)
+    return emb, {r["id"]: Z[i] for i, r in enumerate(rows)}
+
+
+def encode_propositions(emb, rows):
+    props = {r["proposition"] for r in rows}
+    return {p: emb.encode([p])[0] for p in props}
+
+
 def run_random_encoder_trap(rows, E, P, protocol="new_background", tau=0.9, seed=0):
     rng = np.random.default_rng(seed)
     dim = next(iter(E.values())).shape[0]
@@ -142,45 +144,25 @@ def run_random_encoder_trap(rows, E, P, protocol="new_background", tau=0.9, seed
     return run_binary_trap(rows, RandE, RandP, protocol=protocol, tau=tau)
 
 
-def load_embeddings(rows, model):
-    from mechanism_analysis_utils import encode_propositions, load_embeddings as load_emb
-
-    emb, E = load_emb(model, rows)
-    P = encode_propositions(emb, rows)
-    return E, P
-
-
-def main():
+def run_all(output: Path | None = None, device: str | None = None) -> dict:
     rows = load_rows(FULL_DATA)
-    out = ROOT / "outputs" / "artifact_baselines.json"
     results = {"protocol": "new_background", "baselines": {}, "encoders": {}}
 
-    artifact_modes = [
-        "length", "concept_match", "lexical_cue", "bow_coverage",
-    ]
-    for mode in artifact_modes:
+    for mode in ("length", "concept_match", "lexical_cue", "bow_coverage"):
         print(f"artifact {mode} ...", flush=True)
         results["baselines"][mode] = run_artifact_trap(rows, mode)
 
     print("loading encoder caches for random-encoder control ...", flush=True)
-    E, P = load_embeddings(rows, "qwen")
+    E, P = load_embeddings("qwen", rows, device=device)
     results["baselines"]["random_encoder"] = run_random_encoder_trap(rows, E, P)
 
     for model in ("qwen", "jina", "biolord"):
         print(f"encoder reference {model} ...", flush=True)
-        E, P = load_embeddings(rows, model)
+        E, P = load_embeddings(model, rows, device=device)
         results["encoders"][model] = run_binary_trap(rows, E, P)
 
+    out = output or OUTPUT_DIR / "artifact_baselines.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(results, indent=2), encoding="utf-8")
     print(f"saved {out}")
-    for name, metrics in results["baselines"].items():
-        print(
-            f"{name:16s} UNR={metrics['UNR']:.3f} "
-            f"HCUNR={metrics.get('HCUNR@0.9', float('nan')):.3f} "
-            f"known={metrics['known_acc']:.3f}",
-        )
-
-
-if __name__ == "__main__":
-    main()
+    return results

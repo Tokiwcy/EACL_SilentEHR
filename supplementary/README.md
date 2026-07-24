@@ -25,7 +25,8 @@ supplementary/
 └── outputs/          # experiment JSON (created at runtime)
 ```
 
-The repository root also contains `silentehr.py`, `scripts/`, and public controlled JSONL under `data/`.
+The repository root contains `silentehr.py` and public controlled JSONL under `data/`.
+Internal one-off analysis scripts under `scripts/` stay local and are not published.
 
 ## Setup
 

@@ -15,30 +15,20 @@ python silentehr.py --help
 Paper numbers live in `results.tex`. Regeneration commands are listed in
 `results.md`.
 
-## Public vs restricted artifacts
+## Public vs restricted
 
-### Safe to publish (anonymous GitHub)
+### Published on GitHub
 
-- `silentehr.py`, `scripts/`, `configs/`
-- `requirements.txt`, ACL style files, `results.tex`, `PAPER.md`
+- `silentehr.py`, `supplementary/` (reproduction entry points)
+- `requirements.txt`, paper sources (`results.tex`, `PAPER.md`)
 - Controlled benchmark JSONL: `data/controlled_*.jsonl`, `data/pilot.jsonl`
 - `data/background_contamination.json`
-- Annotation guideline templates **without** note text (if added separately)
-- Split manifests that contain **no** MIMIC subject/HADM IDs tied to labels
 
-### Restricted (PhysioNet credentialed access only)
+### Local only (not in public repo)
 
-Do **not** upload to a public repo:
-
-- MIMIC subject/HADM IDs with human or LLM labels
-- `data/mimic_struct.jsonl`, `data/mimic_struct_deepseek.jsonl`
-- `data/mimic_deepseek_labels.jsonl` (contains `evidence_span` quotes)
-- `data/real_clinical_sru*.jsonl`, `data/human*.csv`, audit CSVs
-- `mimic-iv-note-deidentified-free-text-clinical-notes-2.2/`
-- `outputs/` (embeddings, experiment JSON, logs with note-derived content)
-
-Use `scripts/patch_label_source.py` before sharing derived metrics that
-reference the labeling model name.
+- **`scripts/`** — internal analysis, table extraction, human-audit tooling
+- MIMIC subject/HADM IDs, note text, LLM labels, human audit CSVs
+- `outputs/` (embeddings, experiment JSON with note-derived content)
 
 ## Key experiments added for revision
 

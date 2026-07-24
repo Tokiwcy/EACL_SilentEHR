@@ -6,6 +6,10 @@ venv/
 .env
 *.egg-info/
 
+# Local-only analysis scripts (not published)
+scripts/
+tests/
+
 # MIMIC / human restricted (PhysioNet DUA)
 data/mimic_struct.jsonl
 data/mimic_struct_qwen3.jsonl
